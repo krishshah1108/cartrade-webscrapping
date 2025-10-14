@@ -1,3 +1,4 @@
 downloads/
 logs/
 .env
+*.pyc
