@@ -76,7 +76,7 @@ def download_gj_images():
             continue
         if len(raw_reg) < 6:
             logging.warning(f"[WARN] Found auctionId={auction_id} invalid registrationNumber={raw_reg}")
-            if len(sellerRef) > 6 and sellerRef.startsWith("GJ"):
+            if len(sellerRef) > 6 and sellerRef.startswith("GJ"):
                 logging.info(f"  Using sellerRef={sellerRef} instead")
                 raw_reg = sellerRef
             else:
