@@ -68,11 +68,20 @@ def download_gj_images():
     for auction in auctions:
         raw_reg = auction.get("registrationNumber")
         auction_id = auction.get("auctionId", "?")
+        sellerRef = auction.get("sellerRef", "?")
 
         # Missing registration number
         if not raw_reg:
             logging.warning(f"[WARN] Skipped auctionId={auction_id} missing registrationNumber")
             continue
+        if len(raw_reg) != 10:
+            logging.warning(f"[WARN] Found auctionId={auction_id} invalid registrationNumber={raw_reg}")
+            if len(sellerRef) == 10:
+                logging.info(f"  Using sellerRef={sellerRef} instead")
+                raw_reg = sellerRef
+            else:
+                logging.warning(f"[WARN] Skipped auctionId={auction_id} invalid sellerRef={sellerRef} too")
+                continue
 
         # Sanitize registration number
         reg_no = re.sub(r"[^A-Za-z0-9]", "_", raw_reg.strip().upper())
