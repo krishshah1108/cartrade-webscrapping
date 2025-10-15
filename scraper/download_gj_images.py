@@ -16,16 +16,17 @@ import logging
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def download_image(url, save_path):
+def download_image(url, save_path, reg_no):
     """Download a single image with logging."""
     try:
         resp = requests.get(url, timeout=15)
         resp.raise_for_status()
         with open(save_path, "wb") as f:
             f.write(resp.content)
-        logging.info(f"Downloaded image: {save_path}")
+        logging.info(f"✅ Downloaded [{reg_no}]: {os.path.basename(save_path)}")
     except Exception as e:
-        logging.error(f"Failed to download {url}: {e}")
+        logging.error(f"❌ Failed to download [{reg_no}] {url}: {e}")
+
 
 def download_gj_images():
     """Main function to download images and generate metadata for GJ vehicles."""
@@ -64,6 +65,7 @@ def download_gj_images():
     logging.info(f"Processing {len(auctions)} GJ vehicles for image download & metadata.")
     seen_registrations = set()
     valid_count = 0
+    total_images_downloaded = 0
 
     for auction in auctions:
         raw_reg = auction.get("registrationNumber")
@@ -97,23 +99,44 @@ def download_gj_images():
         images_folder = os.path.join(reg_folder, "images")
         os.makedirs(images_folder, exist_ok=True)
 
+        # Get all image URLs from imageUrls array
         image_urls = auction.get("imageUrls", [])
         if not image_urls:
             logging.warning(f"No images found for {reg_no}")
             continue
 
-        to_download = image_urls if len(image_urls) <= image_count else random.sample(image_urls, image_count)
-
+        # Simple logic: if <= image_count, download all; if > image_count, randomly select image_count
+        if len(image_urls) <= image_count:
+            to_download = image_urls  # Download all available images
+            logging.info(f"{auction_id} | {reg_no} | Found {len(image_urls)} images (≤ {image_count}), downloading all")
+        else:
+            # Randomly select image_count images from available images
+            to_download = random.sample(image_urls, image_count)
+            logging.info(f"{auction_id} | {reg_no} | Found {len(image_urls)} images (> {image_count}), randomly selecting {image_count} unique URLs")
+        
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = []
+            images_downloaded = 0
             for idx, img_url in enumerate(to_download, 1):
                 ext = os.path.splitext(img_url)[1].split("?")[0] or ".jpg"
                 save_path = os.path.join(images_folder, f"{idx}{ext}")
-                futures.append(executor.submit(download_image, img_url, save_path))
+                
+                # Skip if image already exists (prevent re-downloading)
+                if os.path.exists(save_path):
+                    logging.info(f"⏭️ Image already exists [{reg_no}], skipping: {os.path.basename(save_path)}")
+                    continue
+                    
+                futures.append(executor.submit(download_image, img_url, save_path, reg_no))
+                images_downloaded += 1
+            
             for future in as_completed(futures):
                 future.result()
+            
+            total_images_downloaded += images_downloaded
+            logging.info(f"📸 Downloaded {images_downloaded} unique images for {reg_no}")
 
         metadata_file = os.path.join(reg_folder, "metadata.txt")
+        os.makedirs(reg_folder, exist_ok=True)  # Ensure directory exists
         with open(metadata_file, "w", encoding="utf-8") as f:
             f.write(f"Yard Name: {auction.get('yardName','')}\n")
             f.write(f"Yard Location: {auction.get('yardLocation','')}\n")
@@ -124,6 +147,11 @@ def download_gj_images():
 
         logging.info(f"Saved metadata for {reg_no}")
 
-    logging.info(f"✅ Processed {valid_count} valid registrations out of {len(auctions)} total auctions.")
-    logging.info("✅ All GJ auctions processed successfully.")
+    logging.info("=" * 60)
+    logging.info("🎯 IMAGE DOWNLOAD SUMMARY")
+    logging.info("=" * 60)
+    logging.info(f"📊 Processed {valid_count} valid registrations out of {len(auctions)} total auctions")
+    logging.info(f"📸 Total images downloaded: {total_images_downloaded}")
+    logging.info("✅ All GJ auctions processed successfully!")
+    logging.info("=" * 60)
 
