@@ -151,7 +151,7 @@ def fetch_auction_details():
             time.sleep(2)
 
         except requests.exceptions.RequestException as e:
-            logging.error(f"Network error for {event_id}: {e}")
+            logging.error(f"Network error or cookie expired for {event_id}: {e}")
         except Exception as e:
             logging.exception(f"Unexpected error for {event_id}: {e}")
 
