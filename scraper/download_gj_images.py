@@ -9,7 +9,7 @@ Download images and metadata for GJ vehicles.
 """
 
 import os
-import re
+import re as _re
 import json
 import random
 import requests
@@ -88,7 +88,7 @@ def extract_js_variables(html_content):
     }
     
     for key, pattern in patterns.items():
-        match = re.search(pattern, html_content)
+        match = _re.search(pattern, html_content)
         if match:
             value = match.group(1).strip()
             if value:  # Only add non-empty values
@@ -187,7 +187,7 @@ def download_gj_images():
                 raw_reg = raw_reg or "UNKNOWN"
 
         # Sanitize registration number
-        reg_no = re.sub(r"[^A-Za-z0-9]", "_", raw_reg.strip().upper())
+        reg_no = _re.sub(r"[^A-Za-z0-9]", "_", raw_reg.strip().upper())
 
         # Folder naming logic
         if both_invalid:
@@ -264,12 +264,11 @@ def download_gj_images():
         # Add Title and itemTitle from JSON data to detailed_info (clean HTML tags)
         if auction.get('Title'):
             # Remove HTML tags from Title
-            import re
-            clean_title = re.sub(r'<[^>]+>', '', auction.get('Title'))
+            clean_title = _re.sub(r'<[^>]+>', '', auction.get('Title'))
             detailed_info['title'] = clean_title.strip()
         if auction.get('itemTitle'):
             # Remove HTML tags from itemTitle
-            clean_item_title = re.sub(r'<[^>]+>', '', auction.get('itemTitle'))
+            clean_item_title = _re.sub(r'<[^>]+>', '', auction.get('itemTitle'))
             detailed_info['item_title'] = clean_item_title.strip()
 
         # Write metadata
