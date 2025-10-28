@@ -14,6 +14,7 @@ import json
 import random
 import requests
 import logging
+import shutil
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -173,3 +174,44 @@ def download_gj_images():
     logging.info(f"📸 Total images downloaded: {total_images_downloaded}")
     logging.info("✅ All GJ auctions processed successfully!")
     logging.info("=" * 60)
+
+
+def create_date_zip(date_folder: str | None = None) -> str | None:
+    """Create a zip archive of downloads/<date_folder>.
+
+    If date_folder is None the function will read SCRAPE_START_DATE from .env.
+    Returns the path to the created zip file, or None on error.
+    """
+    try:
+        if not date_folder:
+            load_dotenv()
+            date_folder = os.getenv("SCRAPE_START_DATE")
+
+        if not date_folder:
+            logging.error("create_date_zip: SCRAPE_START_DATE not set; cannot create zip")
+            return None
+
+        src_dir = os.path.join("downloads", date_folder)
+        if not os.path.exists(src_dir):
+            logging.error(f"create_date_zip: source folder does not exist: {src_dir}")
+            return None
+
+        # Destination zip path: downloads/<date_folder>.zip (shutil will append .zip)
+        base_name = os.path.join("downloads", date_folder)
+
+        # If an existing zip exists, overwrite it by removing first
+        zip_path = base_name + ".zip"
+        if os.path.exists(zip_path):
+            try:
+                os.remove(zip_path)
+            except Exception as e:
+                logging.warning(f"Could not remove existing zip {zip_path}: {e}")
+
+        logging.info(f"Creating zip archive for {src_dir} -> {zip_path} ...")
+        # shutil.make_archive returns the actual archive path
+        archive = shutil.make_archive(base_name, 'zip', root_dir=src_dir)
+        logging.info(f"Created archive: {archive}")
+        return archive
+    except Exception as e:
+        logging.exception(f"Failed to create date zip: {e}")
+        return None
