@@ -261,11 +261,16 @@ def download_gj_images():
             # Add delay between detail page requests
             time.sleep(2)
         
-        # Add Title and itemTitle from JSON data to detailed_info
+        # Add Title and itemTitle from JSON data to detailed_info (clean HTML tags)
         if auction.get('Title'):
-            detailed_info['title'] = auction.get('Title')
+            # Remove HTML tags from Title
+            import re
+            clean_title = re.sub(r'<[^>]+>', '', auction.get('Title'))
+            detailed_info['title'] = clean_title.strip()
         if auction.get('itemTitle'):
-            detailed_info['item_title'] = auction.get('itemTitle')
+            # Remove HTML tags from itemTitle
+            clean_item_title = re.sub(r'<[^>]+>', '', auction.get('itemTitle'))
+            detailed_info['item_title'] = clean_item_title.strip()
 
         # Write metadata
         metadata_file = os.path.join(reg_folder, "metadata.txt")
