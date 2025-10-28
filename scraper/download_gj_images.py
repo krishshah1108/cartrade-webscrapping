@@ -270,9 +270,7 @@ def download_gj_images():
         # Write metadata
         metadata_file = os.path.join(reg_folder, "metadata.txt")
         with open(metadata_file, "w", encoding="utf-8") as f:
-            # Write only the specific fields requested
-            f.write("=== VEHICLE DETAILS ===\n")
-            
+            # Write only the specific fields requested          
             # Add Title and itemTitle first
             if 'title' in detailed_info:
                 f.write(f"Title: {detailed_info['title']}\n")
