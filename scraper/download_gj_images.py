@@ -15,6 +15,7 @@ import random
 import requests
 import logging
 import shutil
+import time
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -29,6 +30,91 @@ def download_image(url, save_path, reg_no):
         logging.info(f"✅ Downloaded [{reg_no}]: {os.path.basename(save_path)}")
     except Exception as e:
         logging.error(f"❌ Failed to download [{reg_no}] {url}: {e}")
+
+
+def extract_js_variables(html_content):
+    """Extract JavaScript variables from HTML content."""
+    details = {}
+    
+    # Patterns to extract specific variables
+    patterns = {
+        'power_steering': r'auction_pw_steering:"([^"]*)"',
+        'fuel_type': r'auction_fuel:"([^"]*)"',
+        'state': r'auction_state:"([^"]*)"',
+        'city': r'auction_city:"([^"]*)"',
+        'yard_location': r'auction_yard_location:"([^"]*)"',
+        'yard_name': r'auction_yard_name:"([^"]*)"',
+        'payment_terms': r'auction_payment_terms:"([^"]*)"',
+        'rc_book_available': r'auction_rcbook_available:"([^"]*)"',
+        'seller_reference': r'auction_seller_reference:"([^"]*)"',
+        'cte_contact_person': r'auction_cte_contact_person_name:"([^"]*)"',
+        'cte_contact_phone': r'auction_cte_contact_person_phone:"([^"]*)"',
+        'sunroof': r'auction_sunroof:"([^"]*)"',
+        'odometer': r'auction_odometer:"([^"]*)"',
+        'color': r'auction_color:"([^"]*)"',
+        'shape': r'auction_shape:"([^"]*)"',
+        'ageing': r'auction_ageing:"([^"]*)"',
+        'delivery_dates': r'auction_delivery_dates:"([^"]*)"',
+        'fuel_endorsement': r'auction_fuel_endors:"([^"]*)"',
+        'registration_type': r'auction_regtype:"([^"]*)"',
+        'registration_number': r'auction_regno:"([^"]*)"',
+        'manufacturing_year': r'auction_mfgymd:"([^"]*)"',
+        'registration_date': r'auction_reg_date:"([^"]*)"',
+        'owner_count': r'auction_owner:"([^"]*)"',
+        'insurance_type': r'auction_insurance:"([^"]*)"',
+        'insurance_expiry': r'auction_ins_exp:"([^"]*)"',
+        'claim_bonus': r'auction_claim_bonus:"([^"]*)"',
+        'claim_percent': r'auction_claim_percent:"([^"]*)"',
+        'hypothecation': r'auction_hypo:"([^"]*)"',
+        'climate_control': r'auction_climate:"([^"]*)"',
+        'door_count': r'auction_doorcount:"([^"]*)"',
+        'gearbox': r'auction_gearbox:"([^"]*)"',
+        'hypo_amount': r'auction_hypo_amount:"([^"]*)"',
+        'bank_name': r'auction_bank_name:"([^"]*)"',
+        'loan_paid_off': r'auction_loan_off:"([^"]*)"',
+        'noc_available': r'auction_noc:"([^"]*)"',
+        'chassis_number': r'auction_chass_no:"([^"]*)"',
+        'engine_number': r'auction_eng_no:"([^"]*)"',
+        'vehicle_condition': r'vehicle_condition:"([^"]*)"',
+        'fitness_validity': r'fitness_validity:"([^"]*)"',
+        'client_contact_person': r'client_contact_person_name:"([^"]*)"',
+        'client_contact_mobile': r'client_contact_person_mobile:"([^"]*)"',
+        'buyer_fee_note': r'buyer_fee_note:"([^"]*)"',
+        'rto_fine': r'rto_fine:"([^"]*)"',
+        'repo_date': r'repo_date:"([^"]*)"',
+        'parking_days': r'parking_days:"([^"]*)"',
+        'parking_rate': r'parking_rate:"([^"]*)"',
+        'parking_charges_approx': r'parking_charges_approx:"([^"]*)"',
+    }
+    
+    for key, pattern in patterns.items():
+        match = re.search(pattern, html_content)
+        if match:
+            value = match.group(1).strip()
+            if value:  # Only add non-empty values
+                details[key] = value
+    
+    return details
+
+
+def fetch_detail_page(detail_link, cookie):
+    """Fetch detail page HTML content."""
+    base_url = "https://www.cartradeexchange.com"
+    full_url = base_url + detail_link
+    
+    headers = {
+        'Cookie': cookie,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36',
+        'Referer': 'https://www.cartradeexchange.com/Events-Live'
+    }
+    
+    try:
+        response = requests.get(full_url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.text
+    except Exception as e:
+        logging.error(f"Error fetching detail page {full_url}: {e}")
+        return None
 
 
 def download_gj_images():
@@ -49,10 +135,14 @@ def download_gj_images():
 
     date_folder = os.getenv("SCRAPE_START_DATE")
     image_count = int(os.getenv("IMAGE_COUNT", 30))
+    cookie = os.getenv("COOKIE", "")
 
     if not date_folder:
         logging.error("SCRAPE_START_DATE not found in .env")
         return
+
+    if not cookie:
+        logging.warning("COOKIE not found in .env - detail page scraping will be skipped")
 
     base_download_folder = os.path.join("downloads", date_folder)
     os.makedirs(base_download_folder, exist_ok=True)
@@ -69,6 +159,7 @@ def download_gj_images():
     seen_registrations = set()
     valid_count = 0
     total_images_downloaded = 0
+    metadata_enhanced = 0
 
     for auction in auctions:
         raw_reg = auction.get("registrationNumber")
@@ -150,28 +241,86 @@ def download_gj_images():
             total_images_downloaded += images_downloaded
             logging.info(f"📸 Downloaded {images_downloaded} unique images for {folder_name}")
 
+        # Extract detailed metadata from detail page if cookie is available
+        detailed_info = {}
+        if cookie and auction.get('detailLink'):
+            detail_link = auction.get('detailLink')
+            logging.info(f"Fetching detailed metadata for {folder_name}...")
+            
+            html_content = fetch_detail_page(detail_link, cookie)
+            if html_content:
+                detailed_info = extract_js_variables(html_content)
+                if detailed_info:
+                    logging.info(f"Extracted {len(detailed_info)} detailed fields for {folder_name}")
+                    metadata_enhanced += 1
+                else:
+                    logging.warning(f"No detailed info extracted for {folder_name}")
+            else:
+                logging.warning(f"Failed to fetch detail page for {folder_name}")
+            
+            # Add delay between detail page requests
+            time.sleep(2)
+        
+        # Add Title and itemTitle from JSON data to detailed_info
+        if auction.get('Title'):
+            detailed_info['title'] = auction.get('Title')
+        if auction.get('itemTitle'):
+            detailed_info['item_title'] = auction.get('itemTitle')
+
         # Write metadata
         metadata_file = os.path.join(reg_folder, "metadata.txt")
         with open(metadata_file, "w", encoding="utf-8") as f:
-            f.write(f"Yard Name: {auction.get('yardName','')}\n")
-            f.write(f"Yard Location: {auction.get('yardLocation','')}\n")
-            f.write(f"Contact Person Name: {auction.get('contactPersonName','')}\n")
-            f.write(f"Contact Person Mobile: {auction.get('contactPersonMobile','')}\n")
-            f.write(f"Item Title: {auction.get('itemTitle','')}\n")
+            # Write only the specific fields requested
+            f.write("=== VEHICLE DETAILS ===\n")
+            
+            # Add Title and itemTitle first
+            if 'title' in detailed_info:
+                f.write(f"Title: {detailed_info['title']}\n")
+            if 'item_title' in detailed_info:
+                f.write(f"Item Title: {detailed_info['item_title']}\n")
+            
+            # Add specific fields from detailed scraping
+            if detailed_info:
+                # Map our extracted keys to readable labels for only the requested fields
+                label_mapping = {
+                    'power_steering': 'Power Steering',
+                    'fuel_type': 'Fuel Type',
+                    'state': 'State',
+                    'city': 'City',
+                    'yard_location': 'Yard Location',
+                    'yard_name': 'Yard Name',
+                    'payment_terms': 'Payment Terms',
+                    'rc_book_available': 'RC Book Available',
+                    'seller_reference': 'Seller Reference',
+                    'cte_contact_person': 'CTE Contact Person',
+                    'cte_contact_phone': 'CTE Contact Phone',
+                    'sunroof': 'Sun Roof',
+                    'manufacturing_year': 'Manufacturing Year',
+                }
+                
+                # Track which fields we've written to avoid duplicates
+                written_fields = set()
+                
+                for key, value in detailed_info.items():
+                    if key in label_mapping and key not in written_fields:
+                        f.write(f"{label_mapping[key]}: {value}\n")
+                        written_fields.add(key)
+            
+            # Add registration number from JSON
             f.write(f"Registration Number: {raw_reg}\n")
-            if both_invalid:
-                f.write("Note: Both registrationNumber and sellerRef invalid. Fallback folder naming used.\n")
-            elif fallback_used:
-                f.write("Note: Used sellerRef as fallback for invalid registrationNumber.\n")
 
         logging.info(f"Saved metadata for {folder_name}")
 
     logging.info("=" * 60)
-    logging.info("🎯 IMAGE DOWNLOAD SUMMARY")
+    logging.info("🎯 IMAGE DOWNLOAD & METADATA ENHANCEMENT SUMMARY")
     logging.info("=" * 60)
     logging.info("Summary: Fallback entries (regNo_auctionId) created only when both registrationNumber and sellerRef invalid.")
     logging.info(f"📊 Processed {valid_count} valid registrations out of {len(auctions)} total auctions")
     logging.info(f"📸 Total images downloaded: {total_images_downloaded}")
+    if cookie:
+        logging.info(f"🔍 Metadata enhanced for {metadata_enhanced} vehicles")
+    else:
+        logging.info("⚠️  Metadata enhancement skipped (no COOKIE found)")
     logging.info("✅ All GJ auctions processed successfully!")
     logging.info("=" * 60)
 

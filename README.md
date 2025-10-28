@@ -11,7 +11,7 @@ A small Python-based scraper that fetches live auction events from cartradeexcha
 - For each bid path, fetches auction details and saves:
   - `downloads/auction_details.json` (full responses per event)
   - `downloads/auction_details_GJ.json` (all auction items whose registration starts with "GJ")
-- Downloads images and writes per-registration folders under `downloads/<SCRAPE_START_DATE>/<REG_NO>/images/` and a `metadata.txt` for each vehicle.
+- Downloads images and writes per-registration folders under `downloads/<SCRAPE_START_DATE>/<REG_NO>/images/` and a `metadata.txt` for each vehicle with detailed vehicle information scraped from individual detail pages.
 
 ## Repo layout
 
@@ -89,6 +89,9 @@ Note: Running `main.py` will call each of the above in sequence.
   - `auction_details.json`
   - `auction_details_GJ.json`
 - Images and metadata under `downloads/<SCRAPE_START_DATE>/<REG_NO>/`
+- Each vehicle folder contains:
+  - `images/` directory with downloaded vehicle images
+  - `metadata.txt` with detailed vehicle information including Title, Item Title, Power Steering, Fuel Type, State, City, Yard Location, Yard Name, Payment Terms, RC Book Available, Seller Reference, CTE Contact Person, CTE Contact Phone, Sun Roof, Manufacturing Year, and Registration Number
 - Logs in `logs/scraper.log`
 
 ## Troubleshooting
