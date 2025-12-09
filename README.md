@@ -1,125 +1,656 @@
-# CarTrade Webscrapping
+# CarTrade & CarDekho Web Scraping Project
 
-A small Python-based scraper that fetches live auction events from cartradeexchange.com, filters insurance events, retrieves auction details, filters vehicles registered in Gujarat (GJ...), and downloads images + metadata for those vehicles.
+A comprehensive Python-based web scraping solution that automatically extracts vehicle auction data from two major Indian auction platforms: **CarTrade Exchange** and **CarDekho Auctions**. The project filters for insurance-related auctions, extracts vehicle details, downloads images, and organizes all data in a structured format.
 
-## What this project does
+---
 
-- Fetches live auction events and saves raw JSON to `downloads/auction_data.json`.
-- Filters insurance auctions (category ID 5) for the configured scrape date and writes:
-  - `downloads/auction_data_filtered.json` (full event objects)
-  - `downloads/bid_paths.json` (array of `{ eventId, bidNowPath }`)
-- For each bid path, fetches auction details and saves:
-  - `downloads/auction_details.json` (full responses per event)
-  - `downloads/auction_details_GJ.json` (all auction items whose registration starts with "GJ")
-- Downloads images and writes per-registration folders under `downloads/<SCRAPE_START_DATE>/<REG_NO>/images/` and a `metadata.txt` for each vehicle with detailed vehicle information scraped from individual detail pages.
+## 📋 Table of Contents
 
-## Repo layout
+1. [Project Overview](#project-overview)
+2. [What This Project Does](#what-this-project-does)
+3. [How It Works](#how-it-works)
+4. [Project Architecture](#project-architecture)
+5. [Installation & Setup](#installation--setup)
+6. [Configuration](#configuration)
+7. [Usage](#usage)
+8. [Output Structure](#output-structure)
+9. [Technical Details](#technical-details)
+10. [Troubleshooting](#troubleshooting)
+11. [Project Structure](#project-structure)
 
-- `main.py` — orchestrates the full pipeline (fetch events → filter → fetch details → download images)
-- `requirements.txt` — Python dependencies
-- `.env` — configuration (not committed to version control in general; included here for convenience in the workspace)
-- `scraper/` — scraping modules:
-  - `events_scraper.py` — fetches and filters events
-  - `auction_details_scraper.py` — fetches auction details and filters for GJ registrations
-  - `download_gj_images.py` — downloads images and metadata for GJ vehicles
-- `downloads/` — output JSON and image folders
-- `logs/` — logs produced by the scrapers
+---
 
-## Requirements
+## 🎯 Project Overview
 
-- Python 3.10+ recommended
-- Install dependencies:
+This project automates the collection of vehicle auction data from two platforms:
+
+### **CarTrade Exchange** (cartradeexchange.com)
+
+- Scrapes live auction events
+- Filters insurance-related auctions
+- Extracts vehicle details for Gujarat-registered vehicles
+- Downloads vehicle images and metadata
+
+### **CarDekho Auctions** (auctions.cardekho.com)
+
+- Fetches dashboard data via API
+- Filters insurance business auctions
+- Extracts vehicle details with images
+- Handles JavaScript-rendered Single Page Applications (SPA)
+
+---
+
+## 🔍 What This Project Does
+
+### CarTrade Exchange Pipeline
+
+1. **Event Fetching**: Retrieves all live auction events from CarTrade Exchange API
+2. **Insurance Filtering**: Filters events by category ID 5 (Insurance) and target date
+3. **Auction Details**: Fetches detailed information for each filtered auction
+4. **Gujarat Filtering**: Extracts only vehicles registered in Gujarat (registration starting with "GJ")
+5. **Image Download**: Downloads all vehicle images and saves metadata
+
+### CarDekho Auctions Pipeline
+
+1. **Dashboard Data**: Fetches all dashboard data via POST API request
+2. **Insurance Filtering**: Filters auctions by:
+   - Business type: "Insurance"
+   - Date from title (e.g., "10Dec25" format)
+3. **Vehicle Extraction**:
+   - Loads auction detail pages using Playwright (handles AngularJS SPA)
+   - Extracts vehicle links from rendered HTML
+   - Filters vehicles by:
+     - Registration: Gujarat (GJ) only
+     - RC Status: "With Papers" only
+4. **Image Extraction**:
+   - Fetches individual vehicle detail pages
+   - Clicks gallery to load all images
+   - Extracts image URLs from multiple HTML attributes
+5. **Retry Logic**: Automatically retries failed/timeout auctions up to 3 times
+6. **Status Tracking**: Maintains status for each auction (complete, partial, failed, timeout, no_match)
+
+---
+
+## ⚙️ How It Works
+
+### Step-by-Step Process
+
+#### **CarTrade Exchange Flow:**
+
+```
+1. Fetch Live Events
+   └─> API Request → downloads/auction_data.json
+
+2. Filter Insurance Events
+   └─> Filter by category_id=5 and date
+   └─> downloads/auction_data_filtered.json
+   └─> downloads/bid_paths.json
+
+3. Fetch Auction Details
+   └─> For each bid path, fetch auction details
+   └─> downloads/auction_details.json
+   └─> Filter for GJ registrations
+   └─> downloads/auction_details_GJ.json
+
+4. Download Images & Metadata
+   └─> For each GJ vehicle:
+       ├─> Create folder: downloads/<DATE>/<REG_NO>/
+       ├─> Download images to images/ folder
+       └─> Save metadata.txt
+```
+
+#### **CarDekho Auctions Flow:**
+
+```
+1. Fetch Dashboard Data
+   └─> POST to /web/getAllDashboardData
+   └─> Extract Bearer token from cookie
+   └─> downloads/cardekho_dashboard_data.json
+
+2. Filter Insurance Business
+   └─> Filter by business="Insurance"
+   └─> Filter by date from title (e.g., "10Dec25")
+   └─> downloads/cardekho_insurance_data.json
+   └─> downloads/cardekho_auction_paths.json
+
+3. Extract Vehicle Data
+   └─> For each auction:
+       ├─> Load page with Playwright (handles SPA)
+       ├─> Scroll to load all vehicles (lazy loading)
+       ├─> Extract vehicle links
+       ├─> Filter: GJ + With Papers
+       └─> For each vehicle:
+           ├─> Fetch vehicle detail page
+           ├─> Click gallery to load images
+           ├─> Extract image URLs
+           └─> Save to cardekho_auction_paths.json
+
+4. Retry Logic
+   └─> Retry timeout auctions (once)
+   └─> Retry partial/failed auctions (3 times)
+```
+
+---
+
+## 🏗️ Project Architecture
+
+### Technology Stack
+
+- **Python 3.10+**: Core programming language
+- **Playwright**: Browser automation for JavaScript-rendered pages
+- **BeautifulSoup4**: HTML parsing and extraction
+- **Requests**: HTTP API requests
+- **python-dotenv**: Environment variable management
+
+### Key Components
+
+1. **API Client**: Handles authenticated requests with cookie-based auth
+2. **SPA Handler**: Uses Playwright to render AngularJS applications
+3. **HTML Parser**: Extracts data using CSS selectors and regex
+4. **Image Extractor**: Multiple fallback methods for image URL extraction
+5. **Retry Mechanism**: Exponential backoff for network issues
+6. **Status Tracker**: Monitors and reports auction processing status
+
+---
+
+## 📦 Installation & Setup
+
+### Prerequisites
+
+- Python 3.10 or higher
+- pip (Python package manager)
+- Internet connection
+- Valid authentication cookies from both platforms
+
+### Step 1: Clone/Download the Project
+
+```powershell
+# Navigate to your project directory
+cd E:\cartrade-webscrapping
+```
+
+### Step 2: Install Python Dependencies
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
 
-## Configuration (`.env`)
+### Step 3: Install Playwright Browsers
 
-Create a `.env` file in the project root with these keys:
+Playwright requires browser binaries to be installed separately:
 
-- `SCRAPER_NAME` — friendly name for logging (optional)
-- `SCRAPE_START_DATE` — target date to filter events (format: `YYYY-MM-DD`)
-- `COOKIE` — authentication cookie string copied from your browser for cartradeexchange.com
-- `IMAGE_COUNT` — (optional) number of images to download per vehicle (default 30)
+```powershell
+playwright install chromium
+```
 
-Example `.env`:
+### Step 4: Get Authentication Cookies
+
+#### For CarTrade Exchange:
+
+1. Open your browser and navigate to `https://cartradeexchange.com`
+2. Log in to your account
+3. Open Developer Tools (F12)
+4. Go to Application/Storage → Cookies
+5. Copy the entire cookie string
+6. Paste it in `.env` as `COOKIE`
+
+#### For CarDekho Auctions:
+
+1. Open your browser and navigate to `https://auctions.cardekho.com`
+2. Log in to your account
+3. Open Developer Tools (F12)
+4. Go to Network tab
+5. Make any request (e.g., refresh page)
+6. Find a request to `auctions.cardekho.com`
+7. Copy the Cookie header value (includes `connect.sid`, `globals`, etc.)
+8. Paste it in `.env` as `CAR_DEKHO_COOKIE`
+
+**Important**: Cookies expire after some time. You'll need to update them periodically.
+
+### Step 5: Create `.env` File
+
+Create a `.env` file in the project root:
 
 ```properties
-SCRAPER_NAME=Tech Krish
-SCRAPE_START_DATE=2025-10-17
-COOKIE=<paste your cookie here>
+SCRAPER_NAME=Your Name
+SCRAPE_START_DATE=2025-12-10
+COOKIE=<paste your CarTrade cookie here>
+CAR_DEKHO_COOKIE=<paste your CarDekho cookie here>
 IMAGE_COUNT=30
 ```
 
-Security note: Keep `COOKIE` secret. Do not commit `.env` to git.
+---
 
-## Usage
+## ⚙️ Configuration
 
-- Run the whole pipeline (recommended):
+### Environment Variables (`.env`)
+
+| Variable            | Required | Description                                        | Example                        |
+| ------------------- | -------- | -------------------------------------------------- | ------------------------------ |
+| `SCRAPER_NAME`      | No       | Friendly name for logging                          | `Tech Krish`                   |
+| `SCRAPE_START_DATE` | Yes      | Target date for filtering auctions (YYYY-MM-DD)    | `2025-12-10`                   |
+| `COOKIE`            | Yes\*    | CarTrade Exchange authentication cookie            | `session_id=abc123; user=...`  |
+| `CAR_DEKHO_COOKIE`  | Yes\*    | CarDekho Auctions authentication cookie            | `connect.sid=...; globals=...` |
+| `IMAGE_COUNT`       | No       | Max images to download per vehicle (CarTrade only) | `30`                           |
+
+\*Required only if using the respective platform
+
+### Date Format in CarDekho Titles
+
+CarDekho auction titles contain dates in format: `dMMMyy` (e.g., "10Dec25" = December 10, 2025)
+
+The scraper automatically:
+
+- Parses dates from titles using regex
+- Matches against `SCRAPE_START_DATE`
+- Only processes auctions matching the target date
+
+---
+
+## 🚀 Usage
+
+### Run Complete Pipeline
+
+Run all scraping steps in sequence:
 
 ```powershell
-python .\main.py
+python main.py
 ```
 
-- Or run individual stages:
+This will:
+
+1. Fetch CarDekho dashboard data
+2. Filter insurance business auctions
+3. Extract vehicle data and images
+4. Save all results to JSON files
+
+### Run Individual Steps
+
+#### CarTrade Exchange (Currently Disabled in main.py)
 
 ```powershell
-# Fetch live events and save downloads/auction_data.json
-python -c "from scraper.events_scraper import fetch_live_events; print(fetch_live_events())"
+# Step 1: Fetch live events
+python -c "from scraper.events_scraper import fetch_live_events; fetch_live_events()"
 
-# Filter insurance events
+# Step 2: Filter insurance events
 python -c "from scraper.events_scraper import filter_insurance_events; filter_insurance_events('downloads/auction_data.json')"
 
-# Fetch auction details (requires downloads/bid_paths.json)
+# Step 3: Fetch auction details
 python -c "from scraper.auction_details_scraper import fetch_auction_details; fetch_auction_details()"
 
-# Download GJ images (requires downloads/auction_details_GJ.json)
+# Step 4: Download images
 python -c "from scraper.download_gj_images import download_gj_images; download_gj_images()"
 ```
 
-Note: Running `main.py` will call each of the above in sequence.
+#### CarDekho Auctions
 
-## Outputs
+```powershell
+# Step 1: Fetch dashboard data
+python -c "from scraper.cardekho_events_scraper import fetch_cardekho_dashboard_data; fetch_cardekho_dashboard_data()"
 
-- JSON files under `downloads/`:
-  - `auction_data.json`
-  - `auction_data_filtered.json`
-  - `bid_paths.json`
-  - `auction_details.json`
-  - `auction_details_GJ.json`
-- Images and metadata under `downloads/<SCRAPE_START_DATE>/<REG_NO>/`
-- Each vehicle folder contains:
-  - `images/` directory with downloaded vehicle images
-  - `metadata.txt` with detailed vehicle information including Title, Item Title, Power Steering, Fuel Type, State, City, Yard Location, Yard Name, Payment Terms, RC Book Available, Seller Reference, CTE Contact Person, CTE Contact Phone, Sun Roof, Manufacturing Year, and Registration Number
-- Logs in `logs/scraper.log`
+# Step 2: Filter insurance business
+python -c "from scraper.cardekho_events_scraper import filter_insurance_business; filter_insurance_business('downloads/cardekho_dashboard_data.json')"
 
-## Troubleshooting
+# Step 3: Extract vehicle data and images
+python -c "from scraper.cardekho_vehicle_scraper import update_auction_paths_with_vehicles; update_auction_paths_with_vehicles()"
+```
 
-- Empty or missing outputs:
-  - Ensure `COOKIE` in `.env` is valid (login/auth cookie may expire). The scrapers read the `COOKIE` value from environment via `python-dotenv`.
-- Parsing errors extracting `pk1` or registration numbers:
-  - The site markup may have changed. See `scraper/auction_details_scraper.py` where `extract_pk1_from_html()` tries a regex and falls back to BeautifulSoup.
-- Network errors or rate-limiting:
-  - The scrapers use modest timeouts and a 2s sleep between requests. You may increase timeouts or add longer delays if you see 429 or similar errors.
-- Image download failures:
-  - `download_gj_images.py` logs failed downloads and continues. Check `logs/scraper.log` for per-URL failures.
+---
 
-## Testing and quality
+## 📁 Output Structure
 
-- The project doesn't include unit tests yet. If you want, I can add a couple of small tests for HTML extraction and the events filter.
+### JSON Files (`downloads/`)
 
-## Next improvements (optional)
+#### CarTrade Exchange:
 
-- Add unit tests for `extract_pk1_from_html` and `filter_insurance_events`.
-- Add CLI entrypoint and flags to run specific stages and override `.env` settings.
-- Add retry/backoff for network requests and better error classification.
-- Persist run metadata (timestamp, counts) to a CSV or DB for reporting.
+- `auction_data.json` - Raw live events from API
+- `auction_data_filtered.json` - Filtered insurance events
+- `bid_paths.json` - Array of `{eventId, bidNowPath}` for fetching details
+- `auction_details.json` - Full auction details for all events
+- `auction_details_GJ.json` - Only Gujarat-registered vehicles
 
-## License
+#### CarDekho Auctions:
+
+- `cardekho_dashboard_data.json` - Raw API response from dashboard
+- `cardekho_insurance_data.json` - Filtered insurance business data
+- `cardekho_auction_paths.json` - **Main output file** with:
+  ```json
+  {
+    "auction_id": "177730",
+    "title": "Exclusive Bajaj Salvage Auction 10Dec25",
+    "slug": "Exclusive-Bajaj-Salvage-Auction-10Dec25",
+    "vehicle_count": 22,
+    "gj_vehicle_count": 5,
+    "status": "complete",
+    "summary": "Status: COMPLETE - Expected: 22, Loaded: 22, Filtered: 5, With Data: 5, With Images: 5",
+    "vehicles": [
+      {
+        "vid": "WI8PGRAM",
+        "item_id": "6663609",
+        "registration_number": "GJ06HD6695",
+        "make_model": "Ford EcoSport 1.5 TITANIUM",
+        "manufacturing_year": "2014",
+        "location": "Vadodara",
+        "rc_status": "With Papers",
+        "vehicleimages": [
+          "http://auctionscdn.cardekho.com/auctionuploads/177730/GJ06HD6695/A (1).JPG",
+          ...
+        ]
+      }
+    ]
+  }
+  ```
+- `cardekho_failed_auctions.json` - Auctions that failed after all retries
+
+### Image Folders (CarTrade Only)
+
+```
+downloads/
+└── 2025-12-10/
+    ├── GJ06HD6695/
+    │   ├── images/
+    │   │   ├── 1.jpg
+    │   │   ├── 2.jpg
+    │   │   └── ...
+    │   └── metadata.txt
+    └── GJ12AB3456/
+        └── ...
+```
+
+### Logs (`logs/`)
+
+- `scraper.log` - Detailed execution log with timestamps, log levels, and messages
+
+---
+
+## 🔧 Technical Details
+
+### Authentication
+
+#### CarDekho Auctions:
+
+The scraper extracts authentication headers from cookies:
+
+1. **Bearer Token**: Extracted from `connect.sid` cookie
+
+   - Format: `s:UD-B4qkcyWQQ-JmRTDmghe2EzMEn7fHb.xxxxx`
+   - Session ID becomes Bearer token: `Authorization: Bearer UD-B4qkcyWQQ-JmRTDmghe2EzMEn7fHb`
+
+2. **User Info**: Extracted from `globals` cookie (JSON)
+   - `userid`: User ID
+   - `parentuserid`: Parent user ID
+   - `associateclient`: Associated client IDs
+
+These are automatically added to API request headers.
+
+### JavaScript Rendering (SPA Handling)
+
+CarDekho uses AngularJS Single Page Application:
+
+- Routes use hash fragments: `#/auctionDetail/...`
+- Content is dynamically loaded via JavaScript
+- **Solution**: Playwright renders the page and waits for content
+
+**Process**:
+
+1. Navigate to URL with Playwright
+2. Wait for DOM content loaded
+3. Wait for vehicle selectors to appear
+4. Scroll to trigger lazy loading
+5. Extract rendered HTML
+6. Parse with BeautifulSoup
+
+### Image Extraction
+
+Multiple fallback methods ensure maximum image extraction:
+
+1. **Primary**: `data-src-pop` attribute (gallery full-size images)
+2. **Secondary**: `data-src` attribute
+3. **Tertiary**: `data-thumb` attribute
+4. **Fallback**: `img src` attribute
+
+**Gallery Opening**:
+
+- Attempts to click "View Photos" link
+- Falls back to clicking main vehicle image
+- Waits for gallery to load before extraction
+
+### Retry Logic
+
+#### Network Timeouts:
+
+- **3 attempts** with exponential backoff (2s, 4s, 8s)
+- Increased timeouts (90 seconds for navigation)
+- Longer waits after page load (3 seconds)
+
+#### Image Extraction:
+
+- **2 retry attempts** if no images found
+- 2-second delay between retries
+- Detailed logging of failure reasons
+
+#### Auction Retries:
+
+1. **Timeout Auctions**: Retried once after all auctions complete
+2. **Partial/Failed Auctions**: Retried 3 times at the end
+   - Only auctions with status `partial` or `failed` are retried
+   - Stops early if all auctions become `complete` or `no_match`
+
+### Status Tracking
+
+Each auction has a `status` field:
+
+- **`complete`**: Expected vehicles = loaded vehicles AND all filtered vehicles have images
+- **`partial`**: Filtered vehicles found, but not all have images or expected ≠ loaded
+- **`timeout`**: Expected vehicles but found 0 (page didn't load)
+- **`failed`**: Failed to fetch auction page after all retries
+- **`no_match`**: No vehicles match filters (GJ + With Papers)
+
+Each auction also has a `summary` field with human-readable status:
+
+```
+"Status: COMPLETE - Expected: 22, Loaded: 22, Filtered: 5, With Data: 5, With Images: 5"
+```
+
+### Date Filtering (CarDekho)
+
+Auction titles contain dates in format: `dMMMyy`
+
+- Example: "Salvage Auction Non Motor J 10Dec25"
+- Parsed as: December 10, 2025
+- Matched against `SCRAPE_START_DATE` from `.env`
+
+---
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+#### 1. "Invalid Request" Error (CarDekho)
+
+**Symptom**: API returns `{"status": 500, "message": "Invalid Request."}`
+
+**Causes**:
+
+- Cookie expired (most common)
+- Missing authentication headers
+- Cookie format incorrect
+
+**Solution**:
+
+1. Get fresh cookie from browser
+2. Ensure cookie includes `connect.sid` and `globals`
+3. Check logs for header extraction status
+
+#### 2. No Images Found
+
+**Symptom**: Vehicles extracted but `vehicleimages` array is empty
+
+**Possible Reasons** (logged in detail):
+
+- HTML too short/invalid
+- Gallery attributes found but no valid URLs
+- View photos link found but gallery not opened
+- No gallery attributes found in HTML
+
+**Solution**:
+
+- Check logs for specific reason
+- Images may not be available for that vehicle
+- Try manual retry of that specific auction
+
+#### 3. Timeout Errors
+
+**Symptom**: "Timeout: Expected X vehicles but found 0"
+
+**Causes**:
+
+- Slow network connection
+- Page taking too long to load
+- JavaScript not rendering properly
+
+**Solution**:
+
+- Automatic retry handles most cases
+- Check `cardekho_failed_auctions.json` for persistent failures
+- Increase timeout values in code if needed
+
+#### 4. Empty Dashboard Data
+
+**Symptom**: `cardekho_dashboard_data.json` is empty or has error
+
+**Causes**:
+
+- Cookie expired
+- API structure changed
+- Authentication failed
+
+**Solution**:
+
+1. Verify cookie is fresh
+2. Check `cardekho_dashboard_data.json` content
+3. Verify Bearer token extraction in logs
+
+#### 5. No Insurance Auctions Found
+
+**Symptom**: Filtering returns 0 auctions
+
+**Causes**:
+
+- No auctions match date filter
+- Business type not "Insurance"
+- Date format mismatch
+
+**Solution**:
+
+- Check `cardekho_dashboard_data.json` for available auctions
+- Verify `SCRAPE_START_DATE` format (YYYY-MM-DD)
+- Check if any auctions have `"business": "Insurance"`
+
+#### 6. Playwright Not Installed
+
+**Symptom**: `ImportError: cannot import name 'sync_playwright'`
+
+**Solution**:
+
+```powershell
+pip install playwright
+playwright install chromium
+```
+
+### Debugging Tips
+
+1. **Check Logs**: `logs/scraper.log` contains detailed execution information
+2. **Inspect JSON Files**: Check intermediate JSON files to see what data was extracted
+3. **Test Individual Steps**: Run steps separately to isolate issues
+4. **Verify Cookies**: Ensure cookies are fresh and complete
+5. **Check Network**: Verify internet connection and site accessibility
+
+---
+
+## 📂 Project Structure
+
+```
+cartrade-webscrapping/
+├── main.py                          # Main entry point, orchestrates pipeline
+├── requirements.txt                 # Python dependencies
+├── .env                            # Configuration (not in git)
+├── README.md                       # This file
+│
+├── scraper/                        # Scraping modules
+│   ├── events_scraper.py          # CarTrade: Fetch and filter events
+│   ├── auction_details_scraper.py # CarTrade: Fetch auction details
+│   ├── download_gj_images.py      # CarTrade: Download images and metadata
+│   ├── cardekho_events_scraper.py # CarDekho: Fetch and filter dashboard data
+│   └── cardekho_vehicle_scraper.py # CarDekho: Extract vehicle data and images
+│
+├── downloads/                      # Output directory
+│   ├── auction_data.json          # CarTrade: Raw events
+│   ├── auction_data_filtered.json # CarTrade: Filtered events
+│   ├── bid_paths.json             # CarTrade: Bid paths
+│   ├── auction_details.json       # CarTrade: Auction details
+│   ├── auction_details_GJ.json    # CarTrade: Gujarat vehicles
+│   ├── cardekho_dashboard_data.json      # CarDekho: Raw dashboard
+│   ├── cardekho_insurance_data.json      # CarDekho: Filtered insurance
+│   ├── cardekho_auction_paths.json       # CarDekho: Main output (vehicles + images)
+│   ├── cardekho_failed_auctions.json     # CarDekho: Failed auctions
+│   └── 2025-12-10/                # CarTrade: Date-based image folders
+│       └── GJ06HD6695/
+│           ├── images/
+│           └── metadata.txt
+│
+└── logs/                           # Log files
+    └── scraper.log                # Execution log
+```
+
+---
+
+## 🔐 Security Notes
+
+1. **Never commit `.env` file**: Contains sensitive authentication cookies
+2. **Cookies expire**: Update cookies periodically when they expire
+3. **Rate limiting**: The scraper includes delays to avoid overwhelming servers
+4. **Respect robots.txt**: Check website terms of service before scraping
+
+---
+
+## 📝 Notes
+
+- **CarTrade scraping is currently disabled** in `main.py` (commented out)
+- Only **CarDekho scraping is active** by default
+- The project uses **incremental saving** - data is saved after each auction
+- **Status tracking** helps identify which auctions need attention
+- **Retry logic** automatically handles most transient failures
+
+---
+
+## 🚧 Future Improvements
+
+- [ ] Add unit tests for HTML extraction and filtering
+- [ ] Add CLI flags to run specific stages
+- [ ] Add database storage option
+- [ ] Add email notifications for completion
+- [ ] Add progress bars for long-running operations
+- [ ] Add support for multiple date ranges
+- [ ] Add data validation and quality checks
+
+---
+
+## 📄 License
 
 This repository contains personal tooling—no license specified.
 
 ---
 
-If you'd like, I can also add a small test file and a simple usage script that runs each step with clearer progress output. Let me know which improvements you'd like next.
+## 🤝 Support
+
+For issues or questions:
+
+1. Check the Troubleshooting section
+2. Review logs in `logs/scraper.log`
+3. Inspect intermediate JSON files in `downloads/`
+4. Verify configuration in `.env`
+
+---
+
+**Last Updated**: December 2025
