@@ -1452,6 +1452,184 @@ def update_auction_paths_with_vehicles():
     return True
 
 
+def download_cardekho_images():
+    """
+    Download images and create metadata for CarDekho vehicles.
+    Processes only auctions with status "complete".
+    Creates folder structure: downloads/<SCRAPE_START_DATE>/<REG_NO>/images/
+    """
+    import random
+    import shutil
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    load_dotenv()
+    date_folder = os.getenv("SCRAPE_START_DATE")
+    image_count = int(os.getenv("IMAGE_COUNT", 30))
+    
+    if not date_folder:
+        logging.error("SCRAPE_START_DATE not found in .env")
+        return False
+    
+    paths_file = "downloads/cardekho_auction_paths.json"
+    if not os.path.exists(paths_file):
+        logging.error(f"Auction paths file not found: {paths_file}")
+        return False
+    
+    # Create base date folder if not exists
+    base_download_folder = os.path.join("downloads", date_folder)
+    os.makedirs(base_download_folder, exist_ok=True)
+    
+    with open(paths_file, "r", encoding="utf-8") as f:
+        auctions = json.load(f)
+    
+    # Filter only complete auctions
+    complete_auctions = [a for a in auctions if a.get('status') == 'complete']
+    
+    if not complete_auctions:
+        logging.warning("No auctions with status 'complete' found")
+        return False
+    
+    logging.info("")
+    logging.info("DOWNLOADING CARDEKHO VEHICLE IMAGES AND METADATA")
+    logging.info(f"Processing {len(complete_auctions)} complete auction(s)")
+    logging.info("")
+    
+    total_vehicles = 0
+    skipped_vehicles = 0
+    processed_vehicles = 0
+    total_images_downloaded = 0
+    
+    def download_image(url, save_path, reg_no):
+        """Download a single image with proper URL handling."""
+        try:
+            # Handle URL encoding - CarDekho URLs may have spaces/special chars
+            # URLs are already clean from extraction, but handle edge cases
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+                'Referer': 'https://auctions.cardekho.com/'
+            }
+            resp = requests.get(url, timeout=15, stream=True, headers=headers)
+            resp.raise_for_status()
+            with open(save_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            return True
+        except Exception as e:
+            logging.error(f"   ❌ Failed to download [{reg_no}]: {str(e)[:50]}")
+            return False
+    
+    for auction in complete_auctions:
+        auction_title = auction.get('title', 'Unknown')
+        vehicles = auction.get('vehicles', [])
+        
+        if not vehicles:
+            continue
+        
+        logging.info(f"Processing auction: {auction_title} ({len(vehicles)} vehicles)")
+        
+        for vehicle in vehicles:
+            reg_no_raw = vehicle.get('registration_number', '')
+            if not reg_no_raw:
+                logging.warning(f"   ⚠️  Skipping vehicle: Missing registration number")
+                continue
+            
+            # Sanitize registration number for folder name
+            reg_no = re.sub(r'[^A-Za-z0-9]', '_', reg_no_raw.strip().upper())
+            reg_folder = os.path.join(base_download_folder, reg_no)
+            images_folder = os.path.join(reg_folder, "images")
+            metadata_file = os.path.join(reg_folder, "metadata.txt")
+            
+            # Check if folder already exists with images and metadata
+            if os.path.exists(reg_folder) and os.path.exists(images_folder) and os.path.exists(metadata_file):
+                # Check if images folder has files
+                existing_images = [f for f in os.listdir(images_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif'))]
+                if existing_images:
+                    logging.info(f"   ⏭️  Skipping {reg_no}: Folder exists with {len(existing_images)} images")
+                    skipped_vehicles += 1
+                    continue
+            
+            total_vehicles += 1
+            
+            # Create folders
+            os.makedirs(images_folder, exist_ok=True)
+            
+            # Get image URLs
+            image_urls = vehicle.get('vehicleimages', [])
+            if not image_urls:
+                logging.warning(f"   ⚠️  No images found for {reg_no}")
+                # Still create metadata even if no images
+            else:
+                # Randomly select non-repetitive images
+                if len(image_urls) <= image_count:
+                    to_download = image_urls
+                else:
+                    to_download = random.sample(image_urls, image_count)
+                
+                logging.info(f"   📸 {reg_no}: Downloading {len(to_download)}/{len(image_urls)} images")
+                
+                # Download images concurrently
+                images_downloaded = 0
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    futures = []
+                    for idx, img_url in enumerate(to_download, 1):
+                        # Extract file extension from URL
+                        ext = os.path.splitext(img_url.split('?')[0])[1] or ".jpg"
+                        save_path = os.path.join(images_folder, f"{idx}{ext}")
+                        
+                        if os.path.exists(save_path):
+                            continue
+                        
+                        futures.append(executor.submit(download_image, img_url, save_path, reg_no))
+                    
+                    for future in as_completed(futures):
+                        if future.result():
+                            images_downloaded += 1
+                    
+                    total_images_downloaded += images_downloaded
+                    logging.info(f"   ✅ {reg_no}: Downloaded {images_downloaded} images")
+            
+            # Create metadata.txt
+            make_model = vehicle.get('make_model', 'N/A')
+            reg_number = vehicle.get('registration_number', 'N/A')
+            year = vehicle.get('manufacturing_year', 'N/A')
+            location = vehicle.get('location', 'N/A')
+            rc_status = vehicle.get('rc_status', 'N/A')
+            transmission = vehicle.get('transmission', 'N/A')
+            ownership = vehicle.get('ownership', 'N/A')
+            fuel_type = vehicle.get('fuel_type', 'N/A')
+            yard_name = vehicle.get('yard_name', 'N/A')
+            yard_location = vehicle.get('yard_location', 'N/A')
+            
+            with open(metadata_file, "w", encoding="utf-8") as f:
+                f.write(f"Title: {make_model}\n")
+                f.write(f"Registration Number: {reg_number}\n")
+                f.write(f"Manufacturing Year: {year}\n")
+                f.write(f"Location: {location}\n")
+                f.write(f"RC Status: {rc_status}\n")
+                f.write(f"Transmission: {transmission}\n")
+                f.write(f"Ownership: {ownership}\n")
+                f.write(f"Fuel Type: {fuel_type}\n")
+                f.write(f"Yard Name: {yard_name}\n")
+                f.write(f"Yard Location: {yard_location}\n")
+            
+            logging.info(f"   📝 {reg_no}: Created metadata.txt")
+            processed_vehicles += 1
+            
+            # Small delay between vehicles
+            time.sleep(0.5)
+    
+    logging.info("")
+    logging.info("CARDEKHO IMAGE DOWNLOAD SUMMARY")
+    logging.info(f"Total vehicles processed: {total_vehicles}")
+    logging.info(f"Skipped (already exists): {skipped_vehicles}")
+    logging.info(f"Newly processed: {processed_vehicles}")
+    logging.info(f"Total images downloaded: {total_images_downloaded}")
+    logging.info("")
+    
+    return True
+
+
 def scrape_cardekho_vehicles():
     """
     Step 3b: Main function to scrape CarDekho vehicle details.

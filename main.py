@@ -1,5 +1,5 @@
 """
-main.py — now runs the full scrape pipeline:
+main.py — Full scraping pipeline:
 CarTrade:
 1. Fetch all live events
 2. Filter insurance events
@@ -9,6 +9,11 @@ CarTrade:
 CarDekho:
 1. Fetch dashboard data
 2. Filter insurance business data
+3. Extract vehicle data and images
+4. Download images and create metadata
+
+Both:
+5. Create zip archive
 """
 
 import logging
@@ -17,7 +22,7 @@ from scraper.auction_details_scraper import fetch_auction_details
 from scraper.download_gj_images import download_gj_images
 from scraper.download_gj_images import create_date_zip
 from scraper.cardekho_events_scraper import fetch_cardekho_dashboard_data, filter_insurance_business
-from scraper.cardekho_vehicle_scraper import update_auction_paths_with_vehicles
+from scraper.cardekho_vehicle_scraper import update_auction_paths_with_vehicles, download_cardekho_images
 from dotenv import load_dotenv
 import os
 
@@ -32,9 +37,6 @@ def main():
     logging.info("👋 Hello %s, scraping started on %s", name, date)
 
     # ========== CarTrade Scraping ==========
-    # COMMENTED OUT FOR TESTING - CarDekho only
-    # Uncomment below to enable CarTrade scraping
-    """
     logging.info("")
     logging.info("=" * 60)
     logging.info("📊 CARTRADE SCRAPING")
@@ -54,18 +56,8 @@ def main():
     fetch_auction_details()
     # After fetching auction details
     download_gj_images()
-    # After images are downloaded, create a zip archive of the date folder
-    try:
-        archive = create_date_zip(None)
-        if archive:
-            logging.info(f"✅ Created archive: {archive}")
-        else:
-            logging.warning("⚠️  create_date_zip did not create an archive")
-    except Exception as e:
-        logging.exception(f"💥 Error while creating date archive: {e}")
-    
+
     logging.info("✅ CarTrade scraping completed successfully!")
-    """
 
     # ========== CarDekho Scraping ==========
     logging.info("")
@@ -85,12 +77,38 @@ def main():
     else:
         logging.info("✅ CarDekho filtering completed successfully!")
     
-    # Step 3a: Extract vehicle links from auction pages
+    # Step 3: Extract vehicle links from auction pages
     if cardekho_filtered_file:
         if not update_auction_paths_with_vehicles():
             logging.warning("⚠️  Vehicle link extraction had errors, but continuing...")
         else:
             logging.info("✅ CarDekho vehicle link extraction completed successfully!")
+    
+    # Step 4: Download images and create metadata
+    logging.info("")
+    logging.info("=" * 60)
+    logging.info("📥 DOWNLOADING CARDEKHO IMAGES AND CREATING METADATA")
+    logging.info("=" * 60)
+    
+    if not download_cardekho_images():
+        logging.warning("⚠️  CarDekho image download had errors, but continuing...")
+    else:
+        logging.info("✅ CarDekho image download completed successfully!")
+    
+    # Step 5: Create zip archive (for both CarTrade and CarDekho)
+    logging.info("")
+    logging.info("=" * 60)
+    logging.info("📦 CREATING ZIP ARCHIVE")
+    logging.info("=" * 60)
+    
+    try:
+        archive = create_date_zip(None)
+        if archive:
+            logging.info(f"✅ Created archive: {archive}")
+        else:
+            logging.warning("⚠️  create_date_zip did not create an archive")
+    except Exception as e:
+        logging.exception(f"💥 Error while creating date archive: {e}")
 
     logging.info("")
     logging.info("=" * 60)
