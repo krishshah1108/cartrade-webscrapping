@@ -87,10 +87,7 @@ def fetch_auction_detail_page(slug, auction_id, cookie, max_retries=3):
             if attempt > 1:
                 # Exponential backoff: 2^attempt seconds (2s, 4s, 8s)
                 backoff_time = 2 ** attempt
-                logging.info(f"   🔄 Retry {attempt}/{max_retries} (waiting {backoff_time}s)...")
                 time.sleep(backoff_time)
-            
-            logging.info(f"   🌐 Loading page: {url} (Attempt {attempt}/{max_retries})")
             
             with sync_playwright() as p:
                 # Launch browser in headless mode
@@ -230,7 +227,7 @@ def fetch_auction_detail_page(slug, auction_id, cookie, max_retries=3):
     return None
 
 
-def fetch_vehicle_detail_page(vehicle_link, vid, item_id, cookie, max_retries=3):
+def fetch_vehicle_detail_page(vehicle_link, vid, item_id, cookie, max_retries=3, auction_idx=None, total_auctions=None, vehicle_idx=None, total_vehicles=None, reg=None):
     """
     Fetch individual vehicle detail page HTML using Playwright.
     Extracts image URLs from the vehicle detail page.
@@ -355,21 +352,25 @@ def fetch_vehicle_detail_page(vehicle_link, vid, item_id, cookie, max_retries=3)
                 # Extract image URLs from HTML using multiple methods
                 image_urls = extract_image_urls_from_html(html)
                 
-                # Log gallery click result
+                # Log gallery click result with context
+                context = ""
+                if auction_idx and total_auctions and vehicle_idx and total_vehicles:
+                    context = f" [Auction: {auction_idx}/{total_auctions}] | [Vehicle: {vehicle_idx}/{total_vehicles}]"
+                
                 if gallery_opened:
                     if len(image_urls) > 0:
                         retry_text = f" (retry {attempt})" if attempt > 1 else ""
-                        logging.info(f"   🖼️  Gallery opened{retry_text}: Found {len(image_urls)} image(s)")
+                        logging.info(f"      {context} 🖼️ Gallery opened{retry_text}: Found {len(image_urls)} images")
                     else:
                         retry_text = f" (retry {attempt}/{max_retries})" if attempt < max_retries else f" (after {max_retries} attempts)"
-                        logging.warning(f"   🖼️  Gallery opened{retry_text}: No images found")
+                        logging.warning(f"      {context} 🖼️ Gallery opened{retry_text}: No images found")
                 else:
                     if len(image_urls) > 0:
                         retry_text = f" (retry {attempt})" if attempt > 1 else ""
-                        logging.info(f"   🖼️  Gallery not opened{retry_text}: Found {len(image_urls)} image(s) from HTML")
+                        logging.info(f"      {context} 🖼️ Gallery not opened{retry_text}: Found {len(image_urls)} images from HTML")
                     else:
                         retry_text = f" (retry {attempt}/{max_retries})" if attempt < max_retries else f" (after {max_retries} attempts)"
-                        logging.warning(f"   🖼️  Gallery not opened{retry_text}: No images found")
+                        logging.warning(f"      {context} 🖼️ Gallery not opened{retry_text}: No images found")
                 
                 browser.close()
                 
@@ -379,17 +380,26 @@ def fetch_vehicle_detail_page(vehicle_link, vid, item_id, cookie, max_retries=3)
             if attempt < max_retries:
                 continue
             else:
-                logging.error(f"   ❌ Timeout after {max_retries} attempts for {vid}")
+                context = ""
+                if auction_idx and total_auctions and vehicle_idx and total_vehicles:
+                    context = f" [Auction: {auction_idx}/{total_auctions}] | [Vehicle: {vehicle_idx}/{total_vehicles}]"
+                logging.error(f"      {context} ❌ Timeout after {max_retries} attempts")
                 return None, []
         except Exception as e:
             if attempt < max_retries:
                 continue
             else:
-                logging.error(f"   ❌ Error after {max_retries} attempts for {vid}: {str(e)[:50]}")
+                context = ""
+                if auction_idx and total_auctions and vehicle_idx and total_vehicles:
+                    context = f" [Auction: {auction_idx}/{total_auctions}] | [Vehicle: {vehicle_idx}/{total_vehicles}]"
+                logging.error(f"      {context} ❌ Error after {max_retries} attempts: {str(e)[:50]}")
                 return None, []
     
     # If we get here, all retries failed
-    logging.error(f"   ❌ Failed to fetch vehicle {vid} detail page after {max_retries} attempts")
+    context = ""
+    if auction_idx and total_auctions and vehicle_idx and total_vehicles:
+        context = f" [Auction: {auction_idx}/{total_auctions}] | [Vehicle: {vehicle_idx}/{total_vehicles}]"
+    logging.error(f"      {context} ❌ Failed to fetch vehicle detail page after {max_retries} attempts")
     return None, []
 
 
@@ -950,20 +960,16 @@ def update_auction_paths_with_vehicles():
         return False
     
     logging.info("")
-    logging.info("STEP 3a: EXTRACTING VEHICLE DATA")
-    logging.info("")
-    logging.info("🎯 FILTER CRITERIA:")
-    logging.info("   ✓ Registration: Gujarat (GJ) only")
-    logging.info("   ✓ RC Status: 'With Papers' only")
+    logging.info("EXTRACTING CARDEKHO VEHICLE DATA")
+    logging.info("   • Filter: Gujarat (GJ) registration + 'With Papers' RC status")
     logging.info("")
     
     # Load auction paths
     with open(paths_file, "r", encoding="utf-8") as f:
         auctions = json.load(f)
     
-    total_expected_vehicles = sum(int(auction.get("vehicle_count", 0) or 0) for auction in auctions)
-    logging.info(f"📦 PROCESSING: {len(auctions)} auctions")
-    logging.info(f"📊 Total vehicles in auctions: {total_expected_vehicles}")
+    total_auctions = len(auctions)
+    logging.info(f"   • Processing {total_auctions} auction(s)")
     logging.info("")
     
     total_vehicles_found = 0
@@ -979,23 +985,18 @@ def update_auction_paths_with_vehicles():
         auction_id = auction.get('auction_id', 'Unknown')
         
         if not slug:
-            logging.warning(f"   ⚠️  Skipping auction {idx}: No slug found")
             continue
         
-        logging.info("")
-        logging.info(f"AUCTION {idx}/{len(auctions)}: {title} (ID: {auction_id}, Expected: {vehicle_count} vehicles)")
-        
+        logging.info(f"   [Auction: {idx}/{total_auctions}] {title} (ID: {auction_id})")
+        logging.info(f"      Expected: {vehicle_count} vehicles")
+        logging.info(f"      [Auction: {idx}/{total_auctions}] 🌐 Loading auction page...")
         auction_html = fetch_auction_detail_page(slug, auction_id, cookie)
         if not auction_html:
-            logging.warning(f"   ❌ Failed to fetch auction page after all retries")
-            auction['vehicles'] = []  # Add empty vehicles array
+            logging.warning(f"      [Auction: {idx}/{total_auctions}] ❌ Failed to load page")
+            auction['vehicles'] = []
             auction['gj_vehicle_count'] = 0
             auction['status'] = "failed"
             auction['summary'] = f"Status: FAILED - Expected: {vehicle_count}, Loaded: 0, Filtered: 0, With Data: 0, With Images: 0"
-            auction['fetch_failed'] = True  # Mark as failed
-            auction['fetch_error'] = "Failed after all retry attempts"
-            
-            # Track failed auction for manual retry
             failed_auctions.append({
                 'auction_id': auction_id,
                 'title': title,
@@ -1004,47 +1005,32 @@ def update_auction_paths_with_vehicles():
                 'index': idx,
                 'error': 'Failed to fetch after all retry attempts'
             })
-            
-            # Save failed auctions to file
-            failed_file = "downloads/cardekho_failed_auctions.json"
-            os.makedirs("downloads", exist_ok=True)
-            with open(failed_file, "w", encoding="utf-8") as f:
-                json.dump(failed_auctions, f, indent=4, ensure_ascii=False)
-            logging.info(f"   📝 Failed auction tracked in {failed_file}")
-            
-            # Save progress even for failed auctions
             with open(paths_file, "w", encoding="utf-8") as f:
                 json.dump(auctions, f, indent=4, ensure_ascii=False)
-            
-            time.sleep(2)  # Brief delay before next auction
+            time.sleep(2)
             continue
         
         # Extract vehicle links from HTML
         all_vehicles = extract_vehicle_links_from_auction_html(auction_html)
+        logging.info(f"      [Auction: {idx}/{total_auctions}] ✅ Loaded: {len(all_vehicles)} vehicles")
         
         # Check if this looks like a timeout (expected vehicles but found 0)
-        is_timeout = False
         if int(vehicle_count or 0) > 0 and len(all_vehicles) == 0:
-            is_timeout = True
-            logging.warning(f"   ⚠️  Timeout: Expected {vehicle_count} vehicles but found 0")
-            # Track for retry
+            logging.warning(f"      [Auction: {idx}/{total_auctions}] ⚠️ Timeout: Expected {vehicle_count} but found 0")
             timeout_auctions.append({
                 'auction_id': auction_id,
                 'title': title,
                 'slug': slug,
                 'vehicle_count': vehicle_count,
                 'index': idx,
-                'auction': auction  # Store reference to update later
+                'auction': auction
             })
-            # Set status for timeout
             auction['status'] = "timeout"
             auction['summary'] = f"Status: TIMEOUT - Expected: {vehicle_count}, Loaded: 0, Filtered: 0, With Data: 0, With Images: 0"
             auction['vehicles'] = []
             auction['gj_vehicle_count'] = 0
-            # Save and continue
             with open(paths_file, "w", encoding="utf-8") as f:
                 json.dump(auctions, f, indent=4, ensure_ascii=False)
-            logging.info("   " + "─" * 56)
             continue
         
         # Filter: Only Gujarat (GJ) vehicles with "With Papers" RC status
@@ -1075,13 +1061,15 @@ def update_auction_paths_with_vehicles():
         total_vehicles_filtered += filtered_out
         
         if len(filtered_vehicles) == 0:
-            logging.warning(f"   ⚠️  No vehicles match filters (GJ + With Papers)")
+            logging.info(f"      [Auction: {idx}/{total_auctions}] Filtered: 0 vehicles (GJ + With Papers)")
+        else:
+            logging.info(f"      [Auction: {idx}/{total_auctions}] Filtered: {len(filtered_vehicles)} vehicles (GJ + With Papers)")
         
         # Extract images for each filtered vehicle with retry logic
         vehicles_with_images = 0
         vehicles_without_images = []
         if len(filtered_vehicles) > 0:
-            logging.info(f"   📸 Extracting images ({len(filtered_vehicles)} vehicles)...")
+            logging.info(f"      📸 Extracting images ({len(filtered_vehicles)} vehicles)...")
             for vehicle_idx, vehicle in enumerate(filtered_vehicles, 1):
                 vid = vehicle.get('vid')
                 item_id = vehicle.get('item_id')
@@ -1091,46 +1079,45 @@ def update_auction_paths_with_vehicles():
                 if not vid or not item_id:
                     vehicle['vehicleimages'] = []
                     vehicles_without_images.append({'reg': reg, 'reason': 'Missing VID or item_id'})
+                    logging.warning(f"      [Auction: {idx}/{total_auctions}] | [Vehicle: {vehicle_idx}/{len(filtered_vehicles)}] {reg}: ⚠️ Missing VID or item_id")
                     continue
                 
-                logging.info(f"      [{vehicle_idx}/{len(filtered_vehicles)}] {reg} (VID: {vid})...")
+                logging.info(f"      [Auction: {idx}/{total_auctions}] | [Vehicle: {vehicle_idx}/{len(filtered_vehicles)}] {reg} (VID: {vid})")
                 
-                # Fetch vehicle detail page and extract images with retry
+                # Fetch vehicle detail page and extract images with retry (3 attempts)
                 image_urls = []
-                max_image_retries = 2  # Retry once if no images found
+                max_image_retries = 3
                 for img_retry in range(1, max_image_retries + 1):
                     try:
-                        html, image_urls = fetch_vehicle_detail_page(vehicle_link, vid, item_id, cookie, max_retries=3)
+                        html, image_urls = fetch_vehicle_detail_page(vehicle_link, vid, item_id, cookie, max_retries=3, auction_idx=idx, total_auctions=total_auctions, vehicle_idx=vehicle_idx, total_vehicles=len(filtered_vehicles), reg=reg)
                         
                         if image_urls and len(image_urls) > 0:
                             vehicle['vehicleimages'] = image_urls
                             filtered_vehicles[vehicle_idx - 1]['vehicleimages'] = image_urls
                             vehicles_with_images += 1
                             if img_retry > 1:
-                                logging.info(f"      [{vehicle_idx}/{len(filtered_vehicles)}] {reg}: Found {len(image_urls)} images (retry {img_retry})")
+                                logging.info(f"      [Auction: {idx}/{total_auctions}] | [Vehicle: {vehicle_idx}/{len(filtered_vehicles)}] {reg}: ✅ Found {len(image_urls)} images (retry {img_retry})")
                             break
-                        else:
-                            if img_retry < max_image_retries:
-                                time.sleep(2)  # Wait before retry
-                            else:
-                                vehicle['vehicleimages'] = []
-                                filtered_vehicles[vehicle_idx - 1]['vehicleimages'] = []
-                                vehicles_without_images.append({'reg': reg, 'vid': vid, 'reason': 'No images found after retries'})
+                        elif img_retry < max_image_retries:
+                            logging.warning(f"      [Auction: {idx}/{total_auctions}] | [Vehicle: {vehicle_idx}/{len(filtered_vehicles)}] {reg}: ⚠️ No images (retry {img_retry}/{max_image_retries})")
+                            time.sleep(2)
                     except Exception as e:
                         if img_retry < max_image_retries:
+                            logging.warning(f"      [Auction: {idx}/{total_auctions}] | [Vehicle: {vehicle_idx}/{len(filtered_vehicles)}] {reg}: ⚠️ Error (retry {img_retry}/{max_image_retries})")
                             time.sleep(2)
                         else:
-                            logging.error(f"      [{vehicle_idx}/{len(filtered_vehicles)}] {reg}: Error - {str(e)[:50]}")
                             vehicle['vehicleimages'] = []
                             filtered_vehicles[vehicle_idx - 1]['vehicleimages'] = []
                             vehicles_without_images.append({'reg': reg, 'vid': vid, 'reason': f'Error: {str(e)[:50]}'})
+                            logging.error(f"      [Auction: {idx}/{total_auctions}] | [Vehicle: {vehicle_idx}/{len(filtered_vehicles)}] {reg}: ❌ Failed after {max_image_retries} attempts")
                 
-                # Small delay between vehicle image fetches
+                if not image_urls:
+                    vehicle['vehicleimages'] = []
+                    filtered_vehicles[vehicle_idx - 1]['vehicleimages'] = []
+                    vehicles_without_images.append({'reg': reg, 'vid': vid, 'reason': 'No images found'})
+                    logging.warning(f"      [Auction: {idx}/{total_auctions}] | [Vehicle: {vehicle_idx}/{len(filtered_vehicles)}] {reg}: ⚠️ No images found")
+                
                 time.sleep(1)
-            
-            # Log summary of image extraction
-            if vehicles_without_images:
-                logging.warning(f"   ⚠️  {len(vehicles_without_images)} vehicle(s) without images")
         
         # Calculate status metrics
         expected_vehicles = vehicle_count
@@ -1156,6 +1143,8 @@ def update_auction_paths_with_vehicles():
         # Create summary sentence
         summary = f"Status: {status.upper()} - Expected: {expected_vehicles}, Loaded: {loaded_vehicles}, Filtered: {filtered_count}, With Data: {vehicles_with_data}, With Images: {vehicles_with_images_count}"
         
+        logging.info(f"      [Auction: {idx}/{total_auctions}] ✅ Status: {status.upper()} | Filtered: {filtered_count} | With Images: {vehicles_with_images_count}/{filtered_count}")
+        
         # Update auction with status and summary
         auction['gj_vehicle_count'] = filtered_count
         auction['vehicles'] = filtered_vehicles
@@ -1164,190 +1153,61 @@ def update_auction_paths_with_vehicles():
         
         total_vehicles_found += filtered_count
         
-        # Log summary
-        logging.info(f"   📊 {summary}")
-        
         # Save after each auction (incremental save to ensure data is persisted)
         with open(paths_file, "w", encoding="utf-8") as f:
             json.dump(auctions, f, indent=4, ensure_ascii=False)
         
-        logging.info(f"   💾 Saved ({idx}/{len(auctions)} processed)")
+        logging.info(f"      [Auction: {idx}/{total_auctions}] 💾 Saved")
         
         # Delay between requests
         time.sleep(2)
     
-    # Retry timeout auctions once
+    # Retry timeout auctions (3 attempts)
     if timeout_auctions:
         logging.info("")
-        logging.info(f"RETRYING TIMEOUT AUCTIONS: {len(timeout_auctions)} auction(s)")
-        logging.info("")
-        
-        retry_successful = 0
-        for retry_idx, timeout_auction in enumerate(timeout_auctions, 1):
-            auction = timeout_auction['auction']
-            slug = timeout_auction['slug']
-            title = timeout_auction['title']
-            auction_id = timeout_auction['auction_id']
-            vehicle_count = timeout_auction['vehicle_count']
-            
-            logging.info(f"RETRY {retry_idx}/{len(timeout_auctions)}: {title} (ID: {auction_id})")
-            
-            # Fetch auction detail page again
-            auction_html = fetch_auction_detail_page(slug, auction_id, cookie)
-            if not auction_html:
-                logging.warning(f"   ❌ Retry failed: Still unable to fetch auction page")
-                continue
-            
-            # Extract vehicle links from HTML
-            logging.info("   🔍 Extracting vehicle data from page...")
-            all_vehicles = extract_vehicle_links_from_auction_html(auction_html)
-            
-            if len(all_vehicles) == 0:
-                logging.warning(f"   ⚠️  Retry found 0 vehicles (may still be timeout)")
-                continue
-            
-            logging.info(f"   ✅ Retry successful! Found {len(all_vehicles)} vehicles")
-            retry_successful += 1
-            
-            # Filter: Only Gujarat (GJ) vehicles with "With Papers" RC status
-            filtered_vehicles = []
-            gj_only_count = 0
-            with_papers_count = 0
-            
-            for vehicle in all_vehicles:
-                reg_no = vehicle.get('registration_number', '')
-                rc_status = vehicle.get('rc_status', '')
-                
-                is_gj = reg_no and reg_no.upper().startswith('GJ')
-                is_with_papers = rc_status and 'with papers' in rc_status.lower()
-                
-                if is_gj:
-                    gj_only_count += 1
-                if is_with_papers:
-                    with_papers_count += 1
-                
-                if is_gj and is_with_papers:
-                    filtered_vehicles.append(vehicle)
-            
-            # Extract images for filtered vehicles with retry
-            vehicles_with_images_retry = 0
-            if len(filtered_vehicles) > 0:
-                logging.info(f"   📸 Extracting images ({len(filtered_vehicles)} vehicles)...")
-                for vehicle_idx, vehicle in enumerate(filtered_vehicles, 1):
-                    vid = vehicle.get('vid')
-                    item_id = vehicle.get('item_id')
-                    vehicle_link = vehicle.get('vehicle_link', '')
-                    reg = vehicle.get('registration_number', 'N/A')
-                    
-                    if not vid or not item_id:
-                        vehicle['vehicleimages'] = []
-                        continue
-                    
-                    # Retry logic for images
-                    image_urls = []
-                    max_image_retries = 2
-                    for img_retry in range(1, max_image_retries + 1):
-                        try:
-                            html, image_urls = fetch_vehicle_detail_page(vehicle_link, vid, item_id, cookie, max_retries=3)
-                            if image_urls and len(image_urls) > 0:
-                                vehicle['vehicleimages'] = image_urls
-                                filtered_vehicles[vehicle_idx - 1]['vehicleimages'] = image_urls
-                                vehicles_with_images_retry += 1
-                                break
-                            elif img_retry < max_image_retries:
-                                time.sleep(2)
-                        except Exception as e:
-                            if img_retry < max_image_retries:
-                                time.sleep(2)
-                            else:
-                                vehicle['vehicleimages'] = []
-                                filtered_vehicles[vehicle_idx - 1]['vehicleimages'] = []
-                    
-                    if not image_urls:
-                        vehicle['vehicleimages'] = []
-                        filtered_vehicles[vehicle_idx - 1]['vehicleimages'] = []
-                    
-                    time.sleep(1)
-            
-            # Update status for retry
-            vehicles_with_data_retry = sum(1 for v in filtered_vehicles if v.get('registration_number') and v.get('make_model'))
-            expected_vehicles_retry = vehicle_count
-            loaded_vehicles_retry = len(all_vehicles)
-            
-            if loaded_vehicles_retry == 0 and expected_vehicles_retry > 0:
-                status_retry = "timeout"
-            elif expected_vehicles_retry == loaded_vehicles_retry and len(filtered_vehicles) > 0 and vehicles_with_images_retry == len(filtered_vehicles):
-                status_retry = "complete"
-            elif len(filtered_vehicles) > 0 and vehicles_with_images_retry == len(filtered_vehicles):
-                status_retry = "partial"
-            elif len(filtered_vehicles) > 0:
-                status_retry = "partial"
-            else:
-                status_retry = "no_match"
-            
-            # Create summary sentence
-            summary_retry = f"Status: {status_retry.upper()} - Expected: {expected_vehicles_retry}, Loaded: {loaded_vehicles_retry}, Filtered: {len(filtered_vehicles)}, With Data: {vehicles_with_data_retry}, With Images: {vehicles_with_images_retry}"
-            
-            # Update the auction in the list
-            auction['gj_vehicle_count'] = len(filtered_vehicles)
-            auction['vehicles'] = filtered_vehicles
-            auction['status'] = status_retry
-            auction['summary'] = summary_retry
-            auction['retry_successful'] = True
-            
-            # Log summary
-            logging.info(f"   📊 {summary_retry}")
-            total_vehicles_found += len(filtered_vehicles)
-            
-            # Save progress after each retry
-            with open(paths_file, "w", encoding="utf-8") as f:
-                json.dump(auctions, f, indent=4, ensure_ascii=False)
-            
-            logging.info(f"   💾 Updated")
-            
-            time.sleep(2)  # Delay between retries
-        
-        logging.info("")
-        logging.info(f"✅ Retry complete: {retry_successful}/{len(timeout_auctions)} auctions successfully retried")
-        logging.info("")
-    
-    # Retry partial and failed auctions 3 times
-    partial_failed_auctions = [auction for auction in auctions if auction.get('status') in ['partial', 'failed']]
-    if partial_failed_auctions:
-        logging.info("")
-        logging.info(f"RETRYING PARTIAL/FAILED AUCTIONS: {len(partial_failed_auctions)} auction(s) (3 attempts)")
+        logging.info(f"RETRYING TIMEOUT AUCTIONS: {len(timeout_auctions)} auction(s) (3 attempts)")
         logging.info("")
         
         for retry_round in range(1, 4):  # 3 retry rounds
-            logging.info(f"Retry Round {retry_round}/3")
-            retry_improved = 0
+            logging.info(f"   Retry Round {retry_round}/3")
+            retry_successful = 0
             
-            for auction in partial_failed_auctions[:]:  # Copy list to modify during iteration
-                if auction.get('status') in ['complete', 'no_match']:
-                    # Status improved, remove from retry list
-                    partial_failed_auctions.remove(auction)
+            for timeout_idx, timeout_auction_info in enumerate(timeout_auctions[:], 1):
+                auction = timeout_auction_info.get('auction')
+                slug = timeout_auction_info.get('slug')
+                auction_id = timeout_auction_info.get('auction_id')
+                title = timeout_auction_info.get('title', 'Unknown')
+                vehicle_count = timeout_auction_info.get('vehicle_count', 0)
+                
+                if not slug or not auction:
                     continue
                 
-                slug = auction.get('slug')
-                auction_id = auction.get('auction_id')
-                title = auction.get('title', 'Unknown')
-                vehicle_count = auction.get('vehicle_count', 0)
-                
-                if not slug:
+                # Check if already resolved
+                if auction.get('status') != 'timeout':
+                    timeout_auctions.remove(timeout_auction_info)
                     continue
                 
-                logging.info(f"   Retry {retry_round}/3: {title} (ID: {auction_id})")
+                # Find auction index in main list
+                auction_main_idx = next((i for i, a in enumerate(auctions, 1) if a.get('auction_id') == auction_id), timeout_idx)
+                
+                logging.info(f"      [Auction: {auction_main_idx}/{len(auctions)}] {title} (Retry Round {retry_round}/3)")
                 
                 # Fetch auction detail page
+                logging.info(f"         [Auction: {auction_main_idx}/{len(auctions)}] 🔄 Reloading auction page...")
                 auction_html = fetch_auction_detail_page(slug, auction_id, cookie)
                 if not auction_html:
+                    logging.warning(f"         [Auction: {auction_main_idx}/{len(auctions)}] ❌ Failed to reload")
                     continue
                 
-                # Extract vehicle links
+                # Extract vehicle links from HTML
                 all_vehicles = extract_vehicle_links_from_auction_html(auction_html)
                 
                 if len(all_vehicles) == 0:
+                    logging.warning(f"         [Auction: {auction_main_idx}/{len(auctions)}] ⚠️ Still timeout: Found 0 vehicles")
                     continue
+                
+                logging.info(f"         [Auction: {auction_main_idx}/{len(auctions)}] ✅ Found {len(all_vehicles)} vehicles")
+                retry_successful += 1
                 
                 # Filter: Only Gujarat (GJ) vehicles with "With Papers" RC status
                 filtered_vehicles = []
@@ -1359,74 +1219,279 @@ def update_auction_paths_with_vehicles():
                     if is_gj and is_with_papers:
                         filtered_vehicles.append(vehicle)
                 
-                # Extract images for filtered vehicles with retry
-                vehicles_with_images_retry = 0
-                for vehicle in filtered_vehicles:
-                    vid = vehicle.get('vid')
-                    item_id = vehicle.get('item_id')
-                    vehicle_link = vehicle.get('vehicle_link', '')
-                    
-                    if not vid or not item_id:
-                        vehicle['vehicleimages'] = []
+                # Extract images for filtered vehicles (3 attempts each)
+                if len(filtered_vehicles) > 0:
+                    logging.info(f"         [Auction: {auction_main_idx}/{len(auctions)}] 📸 Extracting images ({len(filtered_vehicles)} vehicles)...")
+                    for vehicle_idx, vehicle in enumerate(filtered_vehicles, 1):
+                        vid = vehicle.get('vid')
+                        item_id = vehicle.get('item_id')
+                        vehicle_link = vehicle.get('vehicle_link', '')
+                        reg = vehicle.get('registration_number', 'N/A')
+                        
+                        if not vid or not item_id:
+                            vehicle['vehicleimages'] = []
+                            continue
+                        
+                        logging.info(f"         [Auction: {auction_main_idx}/{len(auctions)}] | [Vehicle: {vehicle_idx}/{len(filtered_vehicles)}] {reg} (VID: {vid})")
+                        
+                        # Retry logic for images (3 attempts)
+                        image_urls = []
+                        for img_retry in range(1, 4):
+                            try:
+                                html, image_urls = fetch_vehicle_detail_page(vehicle_link, vid, item_id, cookie, max_retries=3, auction_idx=auction_main_idx, total_auctions=len(auctions), vehicle_idx=vehicle_idx, total_vehicles=len(filtered_vehicles), reg=reg)
+                                if image_urls and len(image_urls) > 0:
+                                    vehicle['vehicleimages'] = image_urls
+                                    filtered_vehicles[vehicle_idx - 1]['vehicleimages'] = image_urls
+                                    if img_retry > 1:
+                                        logging.info(f"         [Auction: {auction_main_idx}/{len(auctions)}] | [Vehicle: {vehicle_idx}/{len(filtered_vehicles)}] {reg}: ✅ Found {len(image_urls)} images (retry {img_retry})")
+                                    break
+                                elif img_retry < 3:
+                                    logging.warning(f"         [Auction: {auction_main_idx}/{len(auctions)}] | [Vehicle: {vehicle_idx}/{len(filtered_vehicles)}] {reg}: ⚠️ No images (retry {img_retry}/3)")
+                                    time.sleep(2)
+                            except Exception:
+                                if img_retry < 3:
+                                    logging.warning(f"         [Auction: {auction_main_idx}/{len(auctions)}] | [Vehicle: {vehicle_idx}/{len(filtered_vehicles)}] {reg}: ⚠️ Error (retry {img_retry}/3)")
+                                    time.sleep(2)
+                                else:
+                                    vehicle['vehicleimages'] = []
+                                    filtered_vehicles[vehicle_idx - 1]['vehicleimages'] = []
+                                    logging.error(f"         [Auction: {auction_main_idx}/{len(auctions)}] | [Vehicle: {vehicle_idx}/{len(filtered_vehicles)}] {reg}: ❌ Failed after 3 attempts")
+                        
+                        if not image_urls:
+                            vehicle['vehicleimages'] = []
+                            filtered_vehicles[vehicle_idx - 1]['vehicleimages'] = []
+                            logging.warning(f"         [Auction: {auction_main_idx}/{len(auctions)}] | [Vehicle: {vehicle_idx}/{len(filtered_vehicles)}] {reg}: ⚠️ No images found")
+                        
+                        time.sleep(1)
+                
+                # Update status for retry
+                vehicles_with_data_retry = sum(1 for v in filtered_vehicles if v.get('registration_number') and v.get('make_model'))
+                vehicles_with_images_retry = sum(1 for v in filtered_vehicles if v.get('vehicleimages') and len(v.get('vehicleimages', [])) > 0)
+                expected_vehicles_retry = vehicle_count
+                loaded_vehicles_retry = len(all_vehicles)
+                
+                if loaded_vehicles_retry == 0 and expected_vehicles_retry > 0:
+                    status_retry = "timeout"
+                elif expected_vehicles_retry == loaded_vehicles_retry and len(filtered_vehicles) > 0 and vehicles_with_images_retry == len(filtered_vehicles):
+                    status_retry = "complete"
+                elif len(filtered_vehicles) > 0 and vehicles_with_images_retry == len(filtered_vehicles):
+                    status_retry = "complete"
+                elif len(filtered_vehicles) > 0:
+                    status_retry = "partial"
+                else:
+                    status_retry = "no_match"
+                
+                # Create summary sentence
+                summary_retry = f"Status: {status_retry.upper()} - Expected: {expected_vehicles_retry}, Loaded: {loaded_vehicles_retry}, Filtered: {len(filtered_vehicles)}, With Data: {vehicles_with_data_retry}, With Images: {vehicles_with_images_retry}"
+                
+                # Update the auction in the list
+                auction['gj_vehicle_count'] = len(filtered_vehicles)
+                auction['vehicles'] = filtered_vehicles
+                auction['status'] = status_retry
+                auction['summary'] = summary_retry
+                
+                # Log summary
+                vehicles_with_images_retry = sum(1 for v in filtered_vehicles if v.get('vehicleimages') and len(v.get('vehicleimages', [])) > 0)
+                logging.info(f"         [Auction: {auction_main_idx}/{len(auctions)}] ✅ Status: {status_retry.upper()} | With Images: {vehicles_with_images_retry}/{len(filtered_vehicles)}")
+                total_vehicles_found += len(filtered_vehicles)
+                
+                # Save progress after each retry
+                with open(paths_file, "w", encoding="utf-8") as f:
+                    json.dump(auctions, f, indent=4, ensure_ascii=False)
+                
+                time.sleep(2)
+            
+            logging.info(f"      ✅ Round {retry_round} complete: {retry_successful} auction(s) resolved")
+            
+            if not timeout_auctions:
+                break
+            
+            if retry_round < 3:
+                time.sleep(3)
+        
+        logging.info("")
+    
+    # Smart retry for partial and failed auctions (3 attempts)
+    partial_failed_auctions = [auction for auction in auctions if auction.get('status') in ['partial', 'failed']]
+    if partial_failed_auctions:
+        logging.info("")
+        logging.info(f"RETRYING PARTIAL/FAILED AUCTIONS: {len(partial_failed_auctions)} auction(s) (3 attempts)")
+        logging.info("")
+        
+        for retry_round in range(1, 4):  # 3 retry rounds
+            logging.info(f"   Retry Round {retry_round}/3")
+            retry_improved = 0
+            
+            for auction_idx, auction in enumerate(partial_failed_auctions[:], 1):
+                if auction.get('status') in ['complete', 'no_match']:
+                    partial_failed_auctions.remove(auction)
+                    continue
+                
+                slug = auction.get('slug')
+                auction_id = auction.get('auction_id')
+                title = auction.get('title', 'Unknown')
+                vehicle_count = auction.get('vehicle_count', 0)
+                existing_vehicles = auction.get('vehicles', [])
+                
+                if not slug:
+                    continue
+                
+                # Find auction index in main list
+                auction_main_idx = next((i for i, a in enumerate(auctions, 1) if a.get('auction_id') == auction_id), auction_idx)
+                
+                logging.info(f"      [Auction: {auction_main_idx}/{len(auctions)}] {title} (Retry Round {retry_round}/3)")
+                
+                # Identify successful vehicles (have both data and images)
+                successful_vehicles = []
+                failed_vehicle_keys = set()  # Track which vehicles need retry
+                
+                for vehicle in existing_vehicles:
+                    has_data = vehicle.get('registration_number') and vehicle.get('make_model')
+                    has_images = vehicle.get('vehicleimages') and len(vehicle.get('vehicleimages', [])) > 0
+                    if has_data and has_images:
+                        successful_vehicles.append(vehicle)
+                    else:
+                        vid = vehicle.get('vid')
+                        item_id = vehicle.get('item_id')
+                        if vid and item_id:
+                            failed_vehicle_keys.add(f"{vid}_{item_id}")
+                
+                # Only reload if expected != loaded, or if we have failed vehicles to retry
+                expected = vehicle_count
+                loaded = len(existing_vehicles) if existing_vehicles else 0
+                needs_reload = (expected != loaded) or len(failed_vehicle_keys) > 0
+                
+                if needs_reload and expected != loaded:
+                    # Reload auction page
+                    logging.info(f"         [Auction: {auction_main_idx}/{len(auctions)}] 🔄 Reloading auction page (Expected: {expected}, Loaded: {loaded})...")
+                    auction_html = fetch_auction_detail_page(slug, auction_id, cookie)
+                    if not auction_html:
+                        logging.warning(f"         [Auction: {auction_main_idx}/{len(auctions)}] ❌ Failed to reload")
                         continue
                     
-                    # Retry logic for images
-                    image_urls = []
-                    max_image_retries = 2
-                    for img_retry in range(1, max_image_retries + 1):
-                        try:
-                            html, image_urls = fetch_vehicle_detail_page(vehicle_link, vid, item_id, cookie, max_retries=3)
-                            if image_urls and len(image_urls) > 0:
-                                vehicle['vehicleimages'] = image_urls
-                                vehicles_with_images_retry += 1
-                                break
-                            elif img_retry < max_image_retries:
-                                time.sleep(2)
-                        except Exception:
-                            if img_retry < max_image_retries:
-                                time.sleep(2)
-                            else:
-                                vehicle['vehicleimages'] = []
+                    all_vehicles = extract_vehicle_links_from_auction_html(auction_html)
                     
-                    if not image_urls:
-                        vehicle['vehicleimages'] = []
+                    # Filter: Only Gujarat (GJ) vehicles with "With Papers" RC status
+                    filtered_vehicles = []
+                    for vehicle in all_vehicles:
+                        reg_no = vehicle.get('registration_number', '')
+                        rc_status = vehicle.get('rc_status', '')
+                        is_gj = reg_no and reg_no.upper().startswith('GJ')
+                        is_with_papers = rc_status and 'with papers' in rc_status.lower()
+                        if is_gj and is_with_papers:
+                            filtered_vehicles.append(vehicle)
                     
-                    time.sleep(1)
+                    # Merge: Keep successful vehicles, retry failed ones
+                    merged_vehicles = successful_vehicles.copy()
+                    for vehicle in filtered_vehicles:
+                        vid = vehicle.get('vid')
+                        item_id = vehicle.get('item_id')
+                        vehicle_key = f"{vid}_{item_id}" if vid and item_id else None
+                        
+                        # Only add if it's a failed vehicle we need to retry
+                        if vehicle_key and vehicle_key in failed_vehicle_keys:
+                            merged_vehicles.append(vehicle)
+                        elif vehicle_key and vehicle_key not in [f"{v.get('vid')}_{v.get('item_id')}" for v in successful_vehicles if v.get('vid') and v.get('item_id')]:
+                            # New vehicle not in successful list
+                            merged_vehicles.append(vehicle)
+                    
+                    filtered_vehicles = merged_vehicles
+                else:
+                    # Only retry failed vehicles, keep successful ones
+                    filtered_vehicles = successful_vehicles.copy()
+                    for vehicle in existing_vehicles:
+                        vid = vehicle.get('vid')
+                        item_id = vehicle.get('item_id')
+                        vehicle_key = f"{vid}_{item_id}" if vid and item_id else None
+                        if vehicle_key and vehicle_key in failed_vehicle_keys:
+                            filtered_vehicles.append(vehicle)
+                
+                # Retry only failed vehicles (3 attempts each)
+                vehicles_to_retry = [v for v in filtered_vehicles if f"{v.get('vid')}_{v.get('item_id')}" in failed_vehicle_keys or not (v.get('vehicleimages') and len(v.get('vehicleimages', [])) > 0)]
+                
+                if vehicles_to_retry:
+                    logging.info(f"         [Auction: {auction_main_idx}/{len(auctions)}] 🔄 Retrying {len(vehicles_to_retry)} failed vehicle(s)...")
+                    for vehicle_idx, vehicle in enumerate(vehicles_to_retry, 1):
+                        vid = vehicle.get('vid')
+                        item_id = vehicle.get('item_id')
+                        vehicle_link = vehicle.get('vehicle_link', '')
+                        reg = vehicle.get('registration_number', 'N/A')
+                        
+                        if not vid or not item_id:
+                            vehicle['vehicleimages'] = []
+                            continue
+                        
+                        logging.info(f"         [Auction: {auction_main_idx}/{len(auctions)}] | [Vehicle: {vehicle_idx}/{len(vehicles_to_retry)}] {reg} (VID: {vid})")
+                        
+                        # Retry logic for images (3 attempts)
+                        image_urls = []
+                        for img_retry in range(1, 4):
+                            try:
+                                html, image_urls = fetch_vehicle_detail_page(vehicle_link, vid, item_id, cookie, max_retries=3, auction_idx=auction_main_idx, total_auctions=len(auctions), vehicle_idx=vehicle_idx, total_vehicles=len(vehicles_to_retry), reg=reg)
+                                if image_urls and len(image_urls) > 0:
+                                    vehicle['vehicleimages'] = image_urls
+                                    # Update in filtered_vehicles list
+                                    for v in filtered_vehicles:
+                                        if v.get('vid') == vid and v.get('item_id') == item_id:
+                                            v['vehicleimages'] = image_urls
+                                    if img_retry > 1:
+                                        logging.info(f"         [Auction: {auction_main_idx}/{len(auctions)}] | [Vehicle: {vehicle_idx}/{len(vehicles_to_retry)}] {reg}: ✅ Found {len(image_urls)} images (retry {img_retry})")
+                                    break
+                                elif img_retry < 3:
+                                    logging.warning(f"         [Auction: {auction_main_idx}/{len(auctions)}] | [Vehicle: {vehicle_idx}/{len(vehicles_to_retry)}] {reg}: ⚠️ No images (retry {img_retry}/3)")
+                                    time.sleep(2)
+                            except Exception:
+                                if img_retry < 3:
+                                    logging.warning(f"         [Auction: {auction_main_idx}/{len(auctions)}] | [Vehicle: {vehicle_idx}/{len(vehicles_to_retry)}] {reg}: ⚠️ Error (retry {img_retry}/3)")
+                                    time.sleep(2)
+                                else:
+                                    vehicle['vehicleimages'] = []
+                                    logging.error(f"         [Auction: {auction_main_idx}/{len(auctions)}] | [Vehicle: {vehicle_idx}/{len(vehicles_to_retry)}] {reg}: ❌ Failed after 3 attempts")
+                        
+                        if not image_urls:
+                            vehicle['vehicleimages'] = []
+                            for v in filtered_vehicles:
+                                if v.get('vid') == vid and v.get('item_id') == item_id:
+                                    v['vehicleimages'] = []
+                            logging.warning(f"         [Auction: {auction_main_idx}/{len(auctions)}] | [Vehicle: {vehicle_idx}/{len(vehicles_to_retry)}] {reg}: ⚠️ No images found")
+                        
+                        time.sleep(1)
                 
                 # Calculate metrics
                 expected_vehicles_retry = vehicle_count
-                loaded_vehicles_retry = len(all_vehicles)
-                filtered_count_retry = len(filtered_vehicles)
+                loaded_vehicles_retry = len(filtered_vehicles)
                 vehicles_with_data_retry = sum(1 for v in filtered_vehicles if v.get('registration_number') and v.get('make_model'))
                 vehicles_with_images_count_retry = sum(1 for v in filtered_vehicles if v.get('vehicleimages') and len(v.get('vehicleimages', [])) > 0)
                 
                 # Determine status
                 if loaded_vehicles_retry == 0 and expected_vehicles_retry > 0:
                     status_retry = "timeout"
-                elif expected_vehicles_retry == loaded_vehicles_retry and filtered_count_retry > 0 and vehicles_with_images_count_retry == filtered_count_retry:
+                elif expected_vehicles_retry == loaded_vehicles_retry and filtered_vehicles and vehicles_with_images_count_retry == len(filtered_vehicles):
                     status_retry = "complete"
-                elif filtered_count_retry > 0 and vehicles_with_images_count_retry == filtered_count_retry:
-                    status_retry = "partial"
-                elif filtered_count_retry > 0:
+                elif filtered_vehicles and vehicles_with_images_count_retry == len(filtered_vehicles):
+                    status_retry = "complete"
+                elif filtered_vehicles:
                     status_retry = "partial"
                 else:
                     status_retry = "no_match"
                 
                 # Create summary
-                summary_retry = f"Status: {status_retry.upper()} - Expected: {expected_vehicles_retry}, Loaded: {loaded_vehicles_retry}, Filtered: {filtered_count_retry}, With Data: {vehicles_with_data_retry}, With Images: {vehicles_with_images_count_retry}"
+                summary_retry = f"Status: {status_retry.upper()} - Expected: {expected_vehicles_retry}, Loaded: {loaded_vehicles_retry}, Filtered: {len(filtered_vehicles)}, With Data: {vehicles_with_data_retry}, With Images: {vehicles_with_images_count_retry}"
                 
                 # Update auction
                 old_status = auction.get('status')
-                auction['gj_vehicle_count'] = filtered_count_retry
+                auction['gj_vehicle_count'] = len(filtered_vehicles)
                 auction['vehicles'] = filtered_vehicles
                 auction['status'] = status_retry
                 auction['summary'] = summary_retry
                 
+                vehicles_with_images_count_retry = sum(1 for v in filtered_vehicles if v.get('vehicleimages') and len(v.get('vehicleimages', [])) > 0)
+                
                 if status_retry != old_status:
                     retry_improved += 1
-                    logging.info(f"   ✅ Status improved: {old_status} → {status_retry}")
+                    logging.info(f"         [Auction: {auction_main_idx}/{len(auctions)}] ✅ Status: {old_status} → {status_retry} | With Images: {vehicles_with_images_count_retry}/{len(filtered_vehicles)}")
                 else:
-                    logging.info(f"   📊 {summary_retry}")
+                    logging.info(f"         [Auction: {auction_main_idx}/{len(auctions)}] Status: {status_retry.upper()} | With Images: {vehicles_with_images_count_retry}/{len(filtered_vehicles)}")
                 
                 # Save progress
                 with open(paths_file, "w", encoding="utf-8") as f:
@@ -1434,28 +1499,68 @@ def update_auction_paths_with_vehicles():
                 
                 time.sleep(2)
             
-            logging.info(f"   Round {retry_round} complete: {retry_improved} auction(s) improved")
+            logging.info(f"      ✅ Round {retry_round} complete: {retry_improved} auction(s) improved")
             
-            # If no more partial/failed auctions, break
             if not partial_failed_auctions:
                 break
             
             if retry_round < 3:
-                logging.info("")
-                time.sleep(3)  # Wait before next round
+                time.sleep(3)
+    
+    # After all retries, create "complete" versions of partial auctions with only successful vehicles
+    logging.info("")
+    logging.info("CREATING COMPLETE VERSIONS OF PARTIAL AUCTIONS")
+    logging.info("")
+    
+    partial_auctions = [a for a in auctions if a.get('status') == 'partial']
+    complete_versions_created = 0
+    
+    for auction in partial_auctions:
+        vehicles = auction.get('vehicles', [])
+        # Filter only vehicles with both data AND images
+        complete_vehicles = []
+        for vehicle in vehicles:
+            has_data = vehicle.get('registration_number') and vehicle.get('make_model')
+            has_images = vehicle.get('vehicleimages') and len(vehicle.get('vehicleimages', [])) > 0
+            if has_data and has_images:
+                complete_vehicles.append(vehicle)
+        
+        if len(complete_vehicles) > 0 and len(complete_vehicles) < len(vehicles):
+            # Create complete version
+            complete_auction = auction.copy()
+            complete_auction['vehicles'] = complete_vehicles
+            complete_auction['gj_vehicle_count'] = len(complete_vehicles)
+            complete_auction['status'] = 'complete'
+            vehicles_with_data = len(complete_vehicles)
+            vehicles_with_images = len(complete_vehicles)
+            complete_auction['summary'] = f"Status: COMPLETE - Expected: {auction.get('vehicle_count', 0)}, Loaded: {len(complete_vehicles)}, Filtered: {len(complete_vehicles)}, With Data: {vehicles_with_data}, With Images: {vehicles_with_images}"
+            complete_auction['title'] = auction.get('title', '') + ' (Complete Version)'
+            
+            # Append to end of auctions list
+            auctions.append(complete_auction)
+            complete_versions_created += 1
+            logging.info(f"   Created complete version: {auction.get('title', 'Unknown')} ({len(complete_vehicles)}/{len(vehicles)} vehicles)")
+    
+    if complete_versions_created > 0:
+        # Save updated auctions with complete versions
+        with open(paths_file, "w", encoding="utf-8") as f:
+            json.dump(auctions, f, indent=4, ensure_ascii=False)
+        logging.info(f"   Created {complete_versions_created} complete version(s)")
     
     # Final summary
     logging.info("")
-    logging.info("EXTRACTION COMPLETE!")
-    logging.info(f"Auctions processed: {len(auctions)}, Vehicles found: {total_vehicles_found}, Excluded: {total_vehicles_filtered}")
+    logging.info("EXTRACTION COMPLETE")
+    logging.info(f"   • Auctions processed: {len(auctions)}")
+    logging.info(f"   • Vehicles found: {total_vehicles_found}")
     if timeout_auctions:
-        logging.info(f"Timeout auctions retried: {len(timeout_auctions)}")
+        logging.info(f"   • Timeout auctions retried: {len(timeout_auctions)}")
     if failed_auctions:
-        logging.warning(f"Failed auctions: {len(failed_auctions)}")
+        logging.warning(f"   • Failed auctions: {len(failed_auctions)}")
     partial_failed_final = [a for a in auctions if a.get('status') in ['partial', 'failed']]
     if partial_failed_final:
-        logging.warning(f"Partial/Failed auctions remaining: {len(partial_failed_final)}")
-    logging.info(f"Data saved to: {paths_file}")
+        logging.warning(f"   • Partial/Failed remaining: {len(partial_failed_final)}")
+    if complete_versions_created > 0:
+        logging.info(f"   • Complete versions created: {complete_versions_created}")
     logging.info("")
     
     return True
