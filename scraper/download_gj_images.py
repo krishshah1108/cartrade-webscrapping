@@ -21,15 +21,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def download_image(url, save_path, reg_no):
-    """Download a single image with logging."""
+    """Download a single image (no logging on success for speed)."""
     try:
         resp = requests.get(url, timeout=15)
         resp.raise_for_status()
         with open(save_path, "wb") as f:
             f.write(resp.content)
-        logging.info(f"✅ Downloaded [{reg_no}]: {os.path.basename(save_path)}")
+        return True
     except Exception as e:
-        logging.error(f"❌ Failed to download [{reg_no}] {url}: {e}")
+        logging.error(f"   ❌ Failed to download [{reg_no}]: {str(e)[:50]}")
+        return False
 
 
 def extract_js_variables(html_content):
@@ -135,19 +136,19 @@ def download_gj_images():
 
     date_folder = os.getenv("SCRAPE_START_DATE")
     image_count = int(os.getenv("IMAGE_COUNT", 30))
-    cookie = os.getenv("COOKIE", "")
+    cookie = os.getenv("CAR_TRADE_COOKIE", "")
 
     if not date_folder:
         logging.error("SCRAPE_START_DATE not found in .env")
         return
 
     if not cookie:
-        logging.warning("COOKIE not found in .env - detail page scraping will be skipped")
+        logging.warning("CAR_TRADE_COOKIE not found in .env - detail page scraping will be skipped")
 
     base_download_folder = os.path.join("downloads", date_folder)
     os.makedirs(base_download_folder, exist_ok=True)
 
-    gj_file = os.path.join("downloads", "auction_details_GJ.json")
+    gj_file = os.path.join("downloads", "cartrade_vehicles_gujarat.json")
     if not os.path.exists(gj_file):
         logging.error(f"{gj_file} not found. Run previous scraper first.")
         return
@@ -156,12 +157,16 @@ def download_gj_images():
         auctions = json.load(f)
 
     logging.info(f"Processing {len(auctions)} GJ vehicles for image download & metadata.")
+    logging.info("")
     seen_registrations = set()
     valid_count = 0
     total_images_downloaded = 0
     metadata_enhanced = 0
+    total_vehicles = len(auctions)
+    current_vehicle = 0
 
     for auction in auctions:
+        current_vehicle += 1
         raw_reg = auction.get("registrationNumber")
         auction_id = auction.get("auctionId", "?")
         sellerRef = auction.get("sellerRef", "?")
@@ -209,18 +214,19 @@ def download_gj_images():
         # Get image URLs
         image_urls = auction.get("imageUrls", [])
         if not image_urls:
-            logging.warning(f"No images found for {folder_name}")
+            logging.warning(f"   [{current_vehicle}/{total_vehicles}] {folder_name}: No images found")
             continue
 
         # Selection logic
         if len(image_urls) <= image_count:
             to_download = image_urls
-            logging.info(f"{auction_id} | {folder_name} | Found {len(image_urls)} images (≤ {image_count}), downloading all")
         else:
             to_download = random.sample(image_urls, image_count)
-            logging.info(f"{auction_id} | {folder_name} | Found {len(image_urls)} images (> {image_count}), selecting {image_count}")
+        
+        logging.info(f"   [{current_vehicle}/{total_vehicles}] {folder_name}: Downloading {len(to_download)}/{len(image_urls)} images")
 
-        # Download concurrently
+        # Download concurrently (reduced logging)
+        failed_downloads = 0
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = []
             images_downloaded = 0
@@ -229,36 +235,31 @@ def download_gj_images():
                 save_path = os.path.join(images_folder, f"{idx}{ext}")
 
                 if os.path.exists(save_path):
-                    logging.info(f"⏭️ Image already exists [{folder_name}], skipping: {os.path.basename(save_path)}")
                     continue
 
                 futures.append(executor.submit(download_image, img_url, save_path, folder_name))
-                images_downloaded += 1
-
+            
             for future in as_completed(futures):
-                future.result()
+                if future.result():
+                    images_downloaded += 1
+                else:
+                    failed_downloads += 1
 
             total_images_downloaded += images_downloaded
-            logging.info(f"📸 Downloaded {images_downloaded} unique images for {folder_name}")
+            if failed_downloads > 0:
+                logging.warning(f"   [{current_vehicle}/{total_vehicles}] {folder_name}: Downloaded {images_downloaded} images, {failed_downloads} failed")
+            else:
+                logging.info(f"   [{current_vehicle}/{total_vehicles}] {folder_name}: Downloaded {images_downloaded} images")
 
         # Extract detailed metadata from detail page if cookie is available
         detailed_info = {}
         if cookie and auction.get('detailLink'):
             detail_link = auction.get('detailLink')
-            logging.info(f"Fetching detailed metadata for {folder_name}...")
-            
             html_content = fetch_detail_page(detail_link, cookie)
             if html_content:
                 detailed_info = extract_js_variables(html_content)
                 if detailed_info:
-                    logging.info(f"Extracted {len(detailed_info)} detailed fields for {folder_name}")
                     metadata_enhanced += 1
-                else:
-                    logging.warning(f"No detailed info extracted for {folder_name}")
-            else:
-                logging.warning(f"Failed to fetch detail page for {folder_name}")
-            
-            # Add delay between detail page requests
             time.sleep(2)
         
         # Add Title and itemTitle from JSON data to detailed_info (clean HTML tags)
@@ -311,20 +312,13 @@ def download_gj_images():
             # Add registration number from JSON
             f.write(f"Registration Number: {raw_reg}\n")
 
-        logging.info(f"Saved metadata for {folder_name}")
-
-    logging.info("=" * 60)
-    logging.info("🎯 IMAGE DOWNLOAD & METADATA ENHANCEMENT SUMMARY")
-    logging.info("=" * 60)
-    logging.info("Summary: Fallback entries (regNo_auctionId) created only when both registrationNumber and sellerRef invalid.")
-    logging.info(f"📊 Processed {valid_count} valid registrations out of {len(auctions)} total auctions")
-    logging.info(f"📸 Total images downloaded: {total_images_downloaded}")
+    logging.info("")
+    logging.info("CARTRADE IMAGE DOWNLOAD SUMMARY")
+    logging.info(f"   • Processed: {valid_count}/{total_vehicles} vehicles")
+    logging.info(f"   • Images downloaded: {total_images_downloaded}")
     if cookie:
-        logging.info(f"🔍 Metadata enhanced for {metadata_enhanced} vehicles")
-    else:
-        logging.info("⚠️  Metadata enhancement skipped (no COOKIE found)")
-    logging.info("✅ All GJ auctions processed successfully!")
-    logging.info("=" * 60)
+        logging.info(f"   • Metadata enhanced: {metadata_enhanced} vehicles")
+    logging.info("")
 
 
 def create_date_zip(date_folder: str | None = None) -> str | None:

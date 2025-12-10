@@ -60,13 +60,13 @@ def fetch_auction_details():
     load_dotenv()
     setup_logger()
 
-    cookie = os.getenv("COOKIE")
+    cookie = os.getenv("CAR_TRADE_COOKIE")
     if not cookie:
-        raise ValueError("COOKIE not found in .env")
+        raise ValueError("CAR_TRADE_COOKIE not found in .env")
 
-    bid_path_file = "downloads/bid_paths.json"
+    bid_path_file = "downloads/cartrade_event_paths.json"
     if not os.path.exists(bid_path_file):
-        logging.error("Missing bid_paths.json — run previous stage first.")
+        logging.error("Missing cartrade_event_paths.json — run previous stage first.")
         return
 
     with open(bid_path_file, "r", encoding="utf-8") as f:
@@ -158,11 +158,11 @@ def fetch_auction_details():
     # Save outputs
     os.makedirs("downloads", exist_ok=True)
 
-    all_file = "downloads/auction_details.json"
+    all_file = "downloads/cartrade_auction_details_full.json"
     with open(all_file, "w", encoding="utf-8") as f:
         json.dump(all_results, f, indent=4, ensure_ascii=False)
 
-    gj_file = "downloads/auction_details_GJ.json"
+    gj_file = "downloads/cartrade_vehicles_gujarat.json"
     with open(gj_file, "w", encoding="utf-8") as f:
         json.dump(gj_filtered, f, indent=4, ensure_ascii=False)
 

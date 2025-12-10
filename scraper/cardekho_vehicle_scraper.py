@@ -580,9 +580,14 @@ def extract_vehicle_details_from_listing(tr_element):
         year_li = tr_element.find('li', title="Mfg Year")
         if year_li:
             year_text = year_li.get_text().strip()
+            # Remove month names, newlines, and extract only year (4 digits)
+            year_text = re.sub(r'\s+', ' ', year_text)  # Normalize whitespace
+            year_text = re.sub(r'\n+', ' ', year_text)  # Remove newlines
             year_match = re.search(r'(\d{4})', year_text)
             if year_match:
                 details['year'] = year_match.group(1)
+            else:
+                details['year'] = year_text.strip()
         
         # Extract Location
         # Pattern: <li title="Location" class="ng-binding"><span class="bullet"></span>Vadodara</li>
@@ -677,9 +682,14 @@ def extract_vehicle_details(html_content):
         year_li = soup.find('li', title="Mfg Year")
         if year_li:
             year_text = year_li.get_text().strip()
+            # Remove month names, newlines, and extract only year (4 digits)
+            year_text = re.sub(r'\s+', ' ', year_text)  # Normalize whitespace
+            year_text = re.sub(r'\n+', ' ', year_text)  # Remove newlines
             year_match = re.search(r'(\d{4})', year_text)
             if year_match:
                 details['year'] = year_match.group(1)
+            else:
+                details['year'] = year_text.strip()
         
         # Extract Location
         location_li = soup.find('li', title="Location")
@@ -796,9 +806,16 @@ def extract_vehicle_links_from_auction_html(html_content):
             year_li = tr_item.find('li', title="Mfg Year")
             if year_li:
                 year_text = year_li.get_text(strip=True)
-                # Remove bullet and extract year
-                year_text = re.sub(r'^[•\s]+', '', year_text)
-                vehicle_data['manufacturing_year'] = year_text
+                # Remove bullet, month names, newlines, and extract only year (4 digits)
+                year_text = re.sub(r'^[•\s]+', '', year_text)  # Remove leading bullets/spaces
+                year_text = re.sub(r'\s+', ' ', year_text)  # Normalize whitespace
+                year_text = re.sub(r'\n+', ' ', year_text)  # Remove newlines
+                # Extract only 4-digit year
+                year_match = re.search(r'(\d{4})', year_text)
+                if year_match:
+                    vehicle_data['manufacturing_year'] = year_match.group(1)
+                else:
+                    vehicle_data['manufacturing_year'] = year_text.strip()
             
             # Extract Location
             location_li = tr_item.find('li', title="Location")
@@ -1064,8 +1081,7 @@ def update_auction_paths_with_vehicles():
         vehicles_with_images = 0
         vehicles_without_images = []
         if len(filtered_vehicles) > 0:
-            logging.info("")
-            logging.info(f"   📸 EXTRACTING VEHICLE IMAGES ({len(filtered_vehicles)} vehicles)...")
+            logging.info(f"   📸 Extracting images ({len(filtered_vehicles)} vehicles)...")
             for vehicle_idx, vehicle in enumerate(filtered_vehicles, 1):
                 vid = vehicle.get('vid')
                 item_id = vehicle.get('item_id')
@@ -1073,7 +1089,6 @@ def update_auction_paths_with_vehicles():
                 reg = vehicle.get('registration_number', 'N/A')
                 
                 if not vid or not item_id:
-                    logging.warning(f"      ⚠️  Vehicle {vehicle_idx}: Missing VID or item_id, skipping")
                     vehicle['vehicleimages'] = []
                     vehicles_without_images.append({'reg': reg, 'reason': 'Missing VID or item_id'})
                     continue
@@ -1092,11 +1107,10 @@ def update_auction_paths_with_vehicles():
                             filtered_vehicles[vehicle_idx - 1]['vehicleimages'] = image_urls
                             vehicles_with_images += 1
                             if img_retry > 1:
-                                logging.info(f"         ✅ Found {len(image_urls)} image(s) on retry {img_retry}")
+                                logging.info(f"      [{vehicle_idx}/{len(filtered_vehicles)}] {reg}: Found {len(image_urls)} images (retry {img_retry})")
                             break
                         else:
                             if img_retry < max_image_retries:
-                                logging.warning(f"         ⚠️  No images found, retrying ({img_retry}/{max_image_retries})...")
                                 time.sleep(2)  # Wait before retry
                             else:
                                 vehicle['vehicleimages'] = []
@@ -1104,10 +1118,9 @@ def update_auction_paths_with_vehicles():
                                 vehicles_without_images.append({'reg': reg, 'vid': vid, 'reason': 'No images found after retries'})
                     except Exception as e:
                         if img_retry < max_image_retries:
-                            logging.warning(f"         ⚠️  Error (retry {img_retry}/{max_image_retries}): {e}")
                             time.sleep(2)
                         else:
-                            logging.error(f"         ❌ Error extracting images for {reg}: {e}")
+                            logging.error(f"      [{vehicle_idx}/{len(filtered_vehicles)}] {reg}: Error - {str(e)[:50]}")
                             vehicle['vehicleimages'] = []
                             filtered_vehicles[vehicle_idx - 1]['vehicleimages'] = []
                             vehicles_without_images.append({'reg': reg, 'vid': vid, 'reason': f'Error: {str(e)[:50]}'})
@@ -1117,11 +1130,7 @@ def update_auction_paths_with_vehicles():
             
             # Log summary of image extraction
             if vehicles_without_images:
-                logging.warning(f"   ⚠️  {len(vehicles_without_images)} vehicle(s) without images:")
-                for v in vehicles_without_images[:5]:  # Show first 5
-                    logging.warning(f"      • {v.get('reg', 'N/A')}: {v.get('reason', 'Unknown')}")
-                if len(vehicles_without_images) > 5:
-                    logging.warning(f"      ... and {len(vehicles_without_images) - 5} more")
+                logging.warning(f"   ⚠️  {len(vehicles_without_images)} vehicle(s) without images")
         
         # Calculate status metrics
         expected_vehicles = vehicle_count
@@ -1491,7 +1500,7 @@ def download_cardekho_images():
     
     logging.info("")
     logging.info("DOWNLOADING CARDEKHO VEHICLE IMAGES AND METADATA")
-    logging.info(f"Processing {len(complete_auctions)} complete auction(s)")
+    logging.info(f"   • Complete auctions: {len(complete_auctions)}")
     logging.info("")
     
     total_vehicles = 0
@@ -1519,19 +1528,19 @@ def download_cardekho_images():
             logging.error(f"   ❌ Failed to download [{reg_no}]: {str(e)[:50]}")
             return False
     
-    for auction in complete_auctions:
+    for auction_idx, auction in enumerate(complete_auctions, 1):
         auction_title = auction.get('title', 'Unknown')
+        auction_id = auction.get('auction_id', 'Unknown')
         vehicles = auction.get('vehicles', [])
         
         if not vehicles:
             continue
         
-        logging.info(f"Processing auction: {auction_title} ({len(vehicles)} vehicles)")
+        logging.info(f"   Auction {auction_idx}/{len(complete_auctions)}: {auction_title} (ID: {auction_id}, {len(vehicles)} vehicles)")
         
-        for vehicle in vehicles:
+        for vehicle_idx, vehicle in enumerate(vehicles, 1):
             reg_no_raw = vehicle.get('registration_number', '')
             if not reg_no_raw:
-                logging.warning(f"   ⚠️  Skipping vehicle: Missing registration number")
                 continue
             
             # Sanitize registration number for folder name
@@ -1545,7 +1554,7 @@ def download_cardekho_images():
                 # Check if images folder has files
                 existing_images = [f for f in os.listdir(images_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif'))]
                 if existing_images:
-                    logging.info(f"   ⏭️  Skipping {reg_no}: Folder exists with {len(existing_images)} images")
+                    logging.info(f"      [{vehicle_idx}/{len(vehicles)}] {reg_no}: Skipped (exists with {len(existing_images)} images)")
                     skipped_vehicles += 1
                     continue
             
@@ -1557,8 +1566,7 @@ def download_cardekho_images():
             # Get image URLs
             image_urls = vehicle.get('vehicleimages', [])
             if not image_urls:
-                logging.warning(f"   ⚠️  No images found for {reg_no}")
-                # Still create metadata even if no images
+                logging.warning(f"      [{vehicle_idx}/{len(vehicles)}] {reg_no}: No images found")
             else:
                 # Randomly select non-repetitive images
                 if len(image_urls) <= image_count:
@@ -1566,10 +1574,11 @@ def download_cardekho_images():
                 else:
                     to_download = random.sample(image_urls, image_count)
                 
-                logging.info(f"   📸 {reg_no}: Downloading {len(to_download)}/{len(image_urls)} images")
+                logging.info(f"      [{vehicle_idx}/{len(vehicles)}] {reg_no}: Downloading {len(to_download)}/{len(image_urls)} images")
                 
-                # Download images concurrently
+                # Download images concurrently (reduced logging)
                 images_downloaded = 0
+                failed_downloads = 0
                 with ThreadPoolExecutor(max_workers=10) as executor:
                     futures = []
                     for idx, img_url in enumerate(to_download, 1):
@@ -1585,9 +1594,14 @@ def download_cardekho_images():
                     for future in as_completed(futures):
                         if future.result():
                             images_downloaded += 1
+                        else:
+                            failed_downloads += 1
                     
                     total_images_downloaded += images_downloaded
-                    logging.info(f"   ✅ {reg_no}: Downloaded {images_downloaded} images")
+                    if failed_downloads > 0:
+                        logging.warning(f"      [{vehicle_idx}/{len(vehicles)}] {reg_no}: Downloaded {images_downloaded} images, {failed_downloads} failed")
+                    else:
+                        logging.info(f"      [{vehicle_idx}/{len(vehicles)}] {reg_no}: Downloaded {images_downloaded} images")
             
             # Create metadata.txt
             make_model = vehicle.get('make_model', 'N/A')
@@ -1613,18 +1627,13 @@ def download_cardekho_images():
                 f.write(f"Yard Name: {yard_name}\n")
                 f.write(f"Yard Location: {yard_location}\n")
             
-            logging.info(f"   📝 {reg_no}: Created metadata.txt")
             processed_vehicles += 1
-            
-            # Small delay between vehicles
-            time.sleep(0.5)
     
     logging.info("")
     logging.info("CARDEKHO IMAGE DOWNLOAD SUMMARY")
-    logging.info(f"Total vehicles processed: {total_vehicles}")
-    logging.info(f"Skipped (already exists): {skipped_vehicles}")
-    logging.info(f"Newly processed: {processed_vehicles}")
-    logging.info(f"Total images downloaded: {total_images_downloaded}")
+    logging.info(f"   • Processed: {processed_vehicles} vehicles")
+    logging.info(f"   • Skipped (exists): {skipped_vehicles} vehicles")
+    logging.info(f"   • Images downloaded: {total_images_downloaded}")
     logging.info("")
     
     return True

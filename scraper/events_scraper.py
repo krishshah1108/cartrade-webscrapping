@@ -2,10 +2,10 @@
 events_scraper.py
 -----------------
 Fetches live auction events from cartradeexchange.com,
-saves raw JSON (auction_data.json),
+saves raw JSON (cartrade_events_raw.json),
 filters insurance events (catId=5) for SCRAPE_START_DATE,
-saves filtered results (auction_data_filtered.json),
-and extracts eventId + bidNowPath (bid_paths.json).
+saves filtered results (cartrade_events_insurance.json),
+and extracts eventId + bidNowPath (cartrade_event_paths.json).
 """
 
 import os
@@ -31,11 +31,11 @@ BASE_URL = "https://www.cartradeexchange.com/Events-Live/"
 
 
 def fetch_live_events():
-    """Fetches live events and saves them as downloads/auction_data.json."""
+    """Fetches live events and saves them as downloads/cartrade_events_raw.json."""
     load_dotenv()
-    cookie = os.getenv("COOKIE")
+    cookie = os.getenv("CAR_TRADE_COOKIE")
     if not cookie:
-        raise ValueError("COOKIE not found in .env file")
+        raise ValueError("CAR_TRADE_COOKIE not found in .env file")
 
     headers = {
         "Content-Type": "application/json",
@@ -71,7 +71,7 @@ def fetch_live_events():
             return None
 
         os.makedirs("downloads", exist_ok=True)
-        filename = "downloads/auction_data.json"
+        filename = "downloads/cartrade_events_raw.json"
 
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(events, f, indent=4, ensure_ascii=False)
@@ -92,8 +92,8 @@ def fetch_live_events():
 def filter_insurance_events(raw_file):
     """
     Filters only insurance events (catId=5) for SCRAPE_START_DATE from .env
-    and saves them to downloads/auction_data_filtered.json.
-    Also extracts [eventId, bidNowPath] into downloads/bid_paths.json.
+    and saves them to downloads/cartrade_events_insurance.json.
+    Also extracts [eventId, bidNowPath] into downloads/cartrade_event_paths.json.
     """
     load_dotenv()
     target_date_str = os.getenv("SCRAPE_START_DATE")
@@ -143,12 +143,12 @@ def filter_insurance_events(raw_file):
     os.makedirs("downloads", exist_ok=True)
 
     # Save filtered full data
-    filtered_file = "downloads/auction_data_filtered.json"
+    filtered_file = "downloads/cartrade_events_insurance.json"
     with open(filtered_file, "w", encoding="utf-8") as f:
         json.dump(filtered, f, indent=4, ensure_ascii=False)
 
     # Save compact bid path array
-    bid_file = "downloads/bid_paths.json"
+    bid_file = "downloads/cartrade_event_paths.json"
     with open(bid_file, "w", encoding="utf-8") as f:
         json.dump(bid_path_data, f, indent=4, ensure_ascii=False)
 

@@ -22,21 +22,24 @@ A comprehensive Python-based web scraping solution that automatically extracts v
 
 ## 🎯 Project Overview
 
-This project automates the collection of vehicle auction data from two platforms:
+This project automates the collection of vehicle auction data from two major Indian auction platforms. It extracts insurance-related auction data, filters for Gujarat-registered vehicles, downloads images, and organizes everything in a structured format.
 
 ### **CarTrade Exchange** (cartradeexchange.com)
 
-- Scrapes live auction events
-- Filters insurance-related auctions
-- Extracts vehicle details for Gujarat-registered vehicles
-- Downloads vehicle images and metadata
+- **API-based scraping**: Uses POST requests to fetch live events
+- **Event filtering**: Filters by category ID 5 (Insurance) and target date
+- **Vehicle filtering**: Extracts only Gujarat (GJ) registered vehicles
+- **Image download**: Downloads vehicle images and creates metadata files
+- **Detail extraction**: Optionally fetches detailed vehicle information from detail pages
 
 ### **CarDekho Auctions** (auctions.cardekho.com)
 
-- Fetches dashboard data via API
-- Filters insurance business auctions
-- Extracts vehicle details with images
-- Handles JavaScript-rendered Single Page Applications (SPA)
+- **API + Browser automation**: Uses POST API for dashboard data, Playwright for SPA pages
+- **Business filtering**: Filters by "Insurance" business type and date from title
+- **Vehicle filtering**: Extracts Gujarat (GJ) vehicles with "With Papers" RC status
+- **Image extraction**: Handles JavaScript-rendered galleries to extract all images
+- **Retry mechanism**: Automatically retries failed/timeout auctions
+- **Status tracking**: Maintains detailed status for each auction
 
 ---
 
@@ -79,18 +82,18 @@ This project automates the collection of vehicle auction data from two platforms
 
 ```
 1. Fetch Live Events
-   └─> API Request → downloads/auction_data.json
+   └─> API Request → downloads/cartrade_events_raw.json
 
 2. Filter Insurance Events
    └─> Filter by category_id=5 and date
-   └─> downloads/auction_data_filtered.json
-   └─> downloads/bid_paths.json
+   └─> downloads/cartrade_events_insurance.json
+   └─> downloads/cartrade_event_paths.json
 
 3. Fetch Auction Details
-   └─> For each bid path, fetch auction details
-   └─> downloads/auction_details.json
+   └─> For each event path, fetch auction details
+   └─> downloads/cartrade_auction_details_full.json
    └─> Filter for GJ registrations
-   └─> downloads/auction_details_GJ.json
+   └─> downloads/cartrade_vehicles_gujarat.json
 
 4. Download Images & Metadata
    └─> For each GJ vehicle:
@@ -192,7 +195,7 @@ playwright install chromium
 3. Open Developer Tools (F12)
 4. Go to Application/Storage → Cookies
 5. Copy the entire cookie string
-6. Paste it in `.env` as `COOKIE`
+6. Paste it in `.env` as `CAR_TRADE_COOKIE`
 
 #### For CarDekho Auctions:
 
@@ -214,7 +217,7 @@ Create a `.env` file in the project root:
 ```properties
 SCRAPER_NAME=Your Name
 SCRAPE_START_DATE=2025-12-10
-COOKIE=<paste your CarTrade cookie here>
+CAR_TRADE_COOKIE=<paste your CarTrade cookie here>
 CAR_DEKHO_COOKIE=<paste your CarDekho cookie here>
 IMAGE_COUNT=30
 ```
@@ -229,7 +232,7 @@ IMAGE_COUNT=30
 | ------------------- | -------- | -------------------------------------------------- | ------------------------------ |
 | `SCRAPER_NAME`      | No       | Friendly name for logging                          | `Tech Krish`                   |
 | `SCRAPE_START_DATE` | Yes      | Target date for filtering auctions (YYYY-MM-DD)    | `2025-12-10`                   |
-| `COOKIE`            | Yes\*    | CarTrade Exchange authentication cookie            | `session_id=abc123; user=...`  |
+| `CAR_TRADE_COOKIE`  | Yes\*    | CarTrade Exchange authentication cookie            | `session_id=abc123; user=...`  |
 | `CAR_DEKHO_COOKIE`  | Yes\*    | CarDekho Auctions authentication cookie            | `connect.sid=...; globals=...` |
 | `IMAGE_COUNT`       | No       | Max images to download per vehicle (CarTrade only) | `30`                           |
 
@@ -257,23 +260,40 @@ Run all scraping steps in sequence:
 python main.py
 ```
 
-This will:
+This will execute the complete pipeline:
 
-1. Fetch CarDekho dashboard data
-2. Filter insurance business auctions
-3. Extract vehicle data and images
-4. Save all results to JSON files
+**CarTrade Exchange:**
+
+1. Fetch all live events from API
+2. Filter insurance events (category ID 5) for target date
+3. Extract bid paths for detailed scraping
+4. Fetch detailed auction data for each event
+5. Filter vehicles by Gujarat (GJ) registration
+6. Download images and create metadata files
+
+**CarDekho Auctions:**
+
+1. Fetch dashboard data via POST API
+2. Filter insurance business auctions by date
+3. Extract vehicle links from auction pages (handles SPA)
+4. Filter vehicles (GJ + With Papers)
+5. Extract vehicle images from detail pages
+6. Download images and create metadata files
+
+**Final Step:**
+
+- Create zip archive of all downloaded data
 
 ### Run Individual Steps
 
-#### CarTrade Exchange (Currently Disabled in main.py)
+#### CarTrade Exchange
 
 ```powershell
 # Step 1: Fetch live events
 python -c "from scraper.events_scraper import fetch_live_events; fetch_live_events()"
 
 # Step 2: Filter insurance events
-python -c "from scraper.events_scraper import filter_insurance_events; filter_insurance_events('downloads/auction_data.json')"
+python -c "from scraper.events_scraper import filter_insurance_events; filter_insurance_events('downloads/cartrade_events_raw.json')"
 
 # Step 3: Fetch auction details
 python -c "from scraper.auction_details_scraper import fetch_auction_details; fetch_auction_details()"
@@ -303,11 +323,11 @@ python -c "from scraper.cardekho_vehicle_scraper import update_auction_paths_wit
 
 #### CarTrade Exchange:
 
-- `auction_data.json` - Raw live events from API
-- `auction_data_filtered.json` - Filtered insurance events
-- `bid_paths.json` - Array of `{eventId, bidNowPath}` for fetching details
-- `auction_details.json` - Full auction details for all events
-- `auction_details_GJ.json` - Only Gujarat-registered vehicles
+- `cartrade_events_raw.json` - All live events from API (raw data)
+- `cartrade_events_insurance.json` - Filtered insurance events (category ID 5, matching date)
+- `cartrade_event_paths.json` - Array of `{eventId, bidNowPath}` for fetching auction details
+- `cartrade_auction_details_full.json` - Full auction details for all events (with API responses)
+- `cartrade_vehicles_gujarat.json` - Only Gujarat-registered vehicles (GJ prefix)
 
 #### CarDekho Auctions:
 
@@ -342,28 +362,70 @@ python -c "from scraper.cardekho_vehicle_scraper import update_auction_paths_wit
   ```
 - `cardekho_failed_auctions.json` - Auctions that failed after all retries
 
-### Image Folders (CarTrade Only)
+### Image Folders (Both Platforms)
+
+Both CarTrade and CarDekho save images to the same date-based folder structure:
 
 ```
 downloads/
-└── 2025-12-10/
-    ├── GJ06HD6695/
+└── 2025-12-10/                    # Date from SCRAPE_START_DATE
+    ├── GJ06HD6695/                # Registration number (sanitized)
     │   ├── images/
     │   │   ├── 1.jpg
     │   │   ├── 2.jpg
-    │   │   └── ...
-    │   └── metadata.txt
+    │   │   └── ... (up to IMAGE_COUNT images)
+    │   └── metadata.txt           # Human-readable vehicle details
     └── GJ12AB3456/
         └── ...
 ```
+
+**Note**:
+
+- CarTrade: Images are randomly selected from available images (up to `IMAGE_COUNT`)
+- CarDekho: Images are randomly selected from `vehicleimages` array (up to `IMAGE_COUNT`)
+- Both platforms skip folders that already exist with images and metadata
 
 ### Logs (`logs/`)
 
 - `scraper.log` - Detailed execution log with timestamps, log levels, and messages
 
+**Log Format:**
+
+```
+2025-12-10 14:30:45 | INFO | Processing 5 GJ vehicles for image download & metadata.
+2025-12-10 14:30:46 | INFO |    [1/5] GJ05JQ3039: Downloading 30/45 images
+2025-12-10 14:30:50 | INFO |    [1/5] GJ05JQ3039: Downloaded 30 images
+2025-12-10 14:30:51 | WARNING |    [2/5] GJ03NK5261: No images found
+```
+
+**Logging Features:**
+
+- Progress indicators: `[X/Y]` format for vehicle/auction counters
+- Auction context: Shows which auction and vehicle is being processed
+- Error details: Specific reasons for failures
+- Summary statistics: Final counts and status
+
 ---
 
 ## 🔧 Technical Details
+
+### Image Download Strategy
+
+#### CarTrade Exchange:
+
+- Downloads images from `imageUrls` array in auction data
+- Randomly selects up to `IMAGE_COUNT` images (default: 30)
+- Uses concurrent downloads (ThreadPoolExecutor with 10 workers)
+- Skips already downloaded images
+- Creates metadata from detail page if cookie is available
+
+#### CarDekho Auctions:
+
+- Downloads images from `vehicleimages` array in vehicle data
+- Randomly selects up to `IMAGE_COUNT` images (default: 30)
+- Uses concurrent downloads (ThreadPoolExecutor with 10 workers)
+- Skips folders that already exist with images and metadata
+- Creates metadata from vehicle JSON data
 
 ### Authentication
 
@@ -436,9 +498,9 @@ Multiple fallback methods ensure maximum image extraction:
    - Only auctions with status `partial` or `failed` are retried
    - Stops early if all auctions become `complete` or `no_match`
 
-### Status Tracking
+### Status Tracking (CarDekho Only)
 
-Each auction has a `status` field:
+Each auction in `cardekho_auction_paths.json` has a `status` field:
 
 - **`complete`**: Expected vehicles = loaded vehicles AND all filtered vehicles have images
 - **`partial`**: Filtered vehicles found, but not all have images or expected ≠ loaded
@@ -448,17 +510,36 @@ Each auction has a `status` field:
 
 Each auction also has a `summary` field with human-readable status:
 
+```json
+{
+  "status": "complete",
+  "summary": "Status: COMPLETE - Expected: 22, Loaded: 22, Filtered: 5, With Data: 5, With Images: 5"
+}
 ```
-"Status: COMPLETE - Expected: 22, Loaded: 22, Filtered: 5, With Data: 5, With Images: 5"
-```
 
-### Date Filtering (CarDekho)
+**Status Metrics:**
 
-Auction titles contain dates in format: `dMMMyy`
+- `Expected`: Number of vehicles expected in auction (from API)
+- `Loaded`: Number of vehicles successfully extracted from page
+- `Filtered`: Number of vehicles matching filters (GJ + With Papers)
+- `With Data`: Number of filtered vehicles with complete data
+- `With Images`: Number of filtered vehicles with extracted images
 
+### Date Filtering
+
+#### CarTrade Exchange:
+
+- Filters events by `eventEndDateTime` matching `SCRAPE_START_DATE`
+- Date format in API: `"14-Oct-2025 14:06"`
+- Only processes events ending on the target date
+
+#### CarDekho Auctions:
+
+- Auction titles contain dates in format: `dMMMyy`
 - Example: "Salvage Auction Non Motor J 10Dec25"
 - Parsed as: December 10, 2025
 - Matched against `SCRAPE_START_DATE` from `.env`
+- Uses regex pattern: `(\d{1,2})(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(\d{2})`
 
 ---
 
@@ -585,17 +666,20 @@ cartrade-webscrapping/
 │   └── cardekho_vehicle_scraper.py # CarDekho: Extract vehicle data and images
 │
 ├── downloads/                      # Output directory
-│   ├── auction_data.json          # CarTrade: Raw events
-│   ├── auction_data_filtered.json # CarTrade: Filtered events
-│   ├── bid_paths.json             # CarTrade: Bid paths
-│   ├── auction_details.json       # CarTrade: Auction details
-│   ├── auction_details_GJ.json    # CarTrade: Gujarat vehicles
-│   ├── cardekho_dashboard_data.json      # CarDekho: Raw dashboard
-│   ├── cardekho_insurance_data.json      # CarDekho: Filtered insurance
-│   ├── cardekho_auction_paths.json       # CarDekho: Main output (vehicles + images)
-│   ├── cardekho_failed_auctions.json     # CarDekho: Failed auctions
-│   └── 2025-12-10/                # CarTrade: Date-based image folders
-│       └── GJ06HD6695/
+│   ├── cartrade_events_raw.json            # CarTrade: All live events (raw)
+│   ├── cartrade_events_insurance.json      # CarTrade: Filtered insurance events
+│   ├── cartrade_event_paths.json           # CarTrade: Event paths for detail fetching
+│   ├── cartrade_auction_details_full.json  # CarTrade: Full auction details
+│   ├── cartrade_vehicles_gujarat.json      # CarTrade: Gujarat vehicles only
+│   ├── cardekho_dashboard_data.json        # CarDekho: Raw dashboard
+│   ├── cardekho_insurance_data.json        # CarDekho: Filtered insurance
+│   ├── cardekho_auction_paths.json         # CarDekho: Main output (vehicles + images)
+│   ├── cardekho_failed_auctions.json       # CarDekho: Failed auctions
+│   └── 2025-12-10/                # Date-based image folders (both platforms)
+│       ├── GJ06HD6695/            # CarTrade vehicle folders
+│       │   ├── images/
+│       │   └── metadata.txt
+│       └── GJ05JQ3039/            # CarDekho vehicle folders
 │           ├── images/
 │           └── metadata.txt
 │
@@ -616,11 +700,12 @@ cartrade-webscrapping/
 
 ## 📝 Notes
 
-- **CarTrade scraping is currently disabled** in `main.py` (commented out)
-- Only **CarDekho scraping is active** by default
-- The project uses **incremental saving** - data is saved after each auction
+- **Both CarTrade and CarDekho scraping are enabled** in `main.py` by default
+- The project uses **incremental saving** - data is saved after each auction/vehicle
 - **Status tracking** helps identify which auctions need attention
 - **Retry logic** automatically handles most transient failures
+- **File naming convention**: All CarTrade files use `cartrade_` prefix, CarDekho files use `cardekho_` prefix
+- **Shared date folder**: Both platforms save images to the same `downloads/<DATE>/` folder structure
 
 ---
 
