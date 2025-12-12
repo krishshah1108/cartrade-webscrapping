@@ -48,8 +48,6 @@ def extract_js_variables(html_content):
         'payment_terms': r'auction_payment_terms:"([^"]*)"',
         'rc_book_available': r'auction_rcbook_available:"([^"]*)"',
         'seller_reference': r'auction_seller_reference:"([^"]*)"',
-        'cte_contact_person': r'auction_cte_contact_person_name:"([^"]*)"',
-        'cte_contact_phone': r'auction_cte_contact_person_phone:"([^"]*)"',
         'sunroof': r'auction_sunroof:"([^"]*)"',
         'odometer': r'auction_odometer:"([^"]*)"',
         'color': r'auction_color:"([^"]*)"',
@@ -295,8 +293,6 @@ def download_gj_images():
                     'payment_terms': 'Payment Terms',
                     'rc_book_available': 'RC Book Available',
                     'seller_reference': 'Seller Reference',
-                    'cte_contact_person': 'CTE Contact Person',
-                    'cte_contact_phone': 'CTE Contact Phone',
                     'sunroof': 'Sun Roof',
                     'manufacturing_year': 'Manufacturing Year',
                 }
